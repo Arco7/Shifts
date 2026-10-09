@@ -2,6 +2,7 @@
 
 import { h, icon } from './dom.js';
 import { targetState } from './autobackup.js';
+import { clientIdProblem } from './drive.js';
 import { T, f, fmtStamp, errText } from './strings.js';
 
 // one line about one backup target: {level, label, text, sub}
@@ -37,7 +38,7 @@ export function describeTarget(kind) {
       short = s.lastFail ? T.stripFailed : '';
       break;
     case 'not_configured':
-      text = T.bNotConfiguredTitle;
+      text = clientIdProblem() === 'bad' ? T.bBadClientIdTitle : T.bNotConfiguredTitle;
       break;
     case 'permission':
       text = stamp || T.bNone;

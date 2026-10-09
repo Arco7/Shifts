@@ -276,6 +276,11 @@ export async function fetchDriveBackup(id, { interactive = false } = {}) {
 
 let inflight = null;
 let again = false;
+// called after the silent follow-up round finished, so the screen can reload the status
+let followUpHook = null;
+export function onFollowUp(fn) {
+  followUpHook = fn;
+}
 
 export function errorCode(e) {
   return (e && e.code) || 'error';
@@ -292,7 +297,10 @@ export function runBackup(db, { interactive = false } = {}) {
     if (again) {
       again = false;
       // changes made while the backup was running: one more silent round
-      Promise.resolve().then(() => runBackup(globalThis.__shiftlogDb || db, { interactive: false })).catch(() => {});
+      Promise.resolve()
+        .then(() => runBackup(globalThis.__shiftlogDb || db, { interactive: false }))
+        .then(() => (followUpHook ? followUpHook() : null))
+        .catch(() => {});
     }
   });
   return inflight;
@@ -318,7 +326,7 @@ async function doRun(db, { interactive }) {
     result.drive = { ok: false, code, message: String(d.reason?.message || '') };
     // A silent run without a valid Google token is not a failure, it was simply not attempted:
     // the screen then asks for one tap instead of showing a red error.
-    const notAttempted = code === 'not_configured' || (!interactive && (code === 'need_login' || code === 'unauthorized'));
+    const notAttempted = code === 'not_configured' || code === 'redirecting' || (!interactive && (code === 'need_login' || code === 'unauthorized'));
     if (!notAttempted) status.drive.lastFail = { at, code, message: result.drive.message };
   }
   if (l.status === 'fulfilled') {

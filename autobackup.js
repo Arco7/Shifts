@@ -21,6 +21,12 @@ export async function loadStatus() {
   ctx.status = s;
 }
 
+// the silent follow-up round (changes made during a backup) must also refresh the screen
+B.onFollowUp(async () => {
+  await loadStatus();
+  ctx.render?.();
+});
+
 export async function refreshLocalPerm() {
   if (!ctx.localDir) {
     ctx.localPerm = null;
@@ -90,7 +96,9 @@ export function requestAutoBackup({ fromTap = false } = {}) {
     return;
   }
   // The Google window may only open right after a tap, and only if the user signed in before.
-  const interactive = fromTap && drive.isConfigured() && !drive.cachedToken() && !!drive.accountEmail();
+  // (Redirect sign-in would throw the whole page to Google after a plain save, so there the
+  // screen asks for a tap instead.)
+  const interactive = fromTap && drive.signInMode() === 'popup' && drive.isConfigured() && !drive.cachedToken() && !!drive.accountEmail();
   runBackupNow({ interactive });
 }
 
@@ -102,13 +110,15 @@ export function runBackupNow({ interactive = false, manual = false } = {}) {
     return Promise.resolve(null);
   }
   globalThis.__shiftlogDb = ctx.db;
+  if (interactive) drive.expectIntent('backup');
   const p = B.runBackup(ctx.db, { interactive }); // starts Google sign-in synchronously when needed
   ctx.busy = true;
   ctx.render();
   return p
     .then(async (r) => {
       await loadStatus();
-      ctx.lastResult = { ...r, manual, shownAt: Date.now() };
+      // on its way to Google: the real result comes after the user is back
+      ctx.lastResult = r && r.drive && r.drive.code === 'redirecting' ? null : { ...r, manual, shownAt: Date.now() };
       return r;
     })
     .catch((e) => {
@@ -122,11 +132,38 @@ export function runBackupNow({ interactive = false, manual = false } = {}) {
 }
 
 export async function signInGoogle() {
+  drive.expectIntent('signin');
   const p = drive.getToken({ interactive: true }); // synchronous start (tap rule)
   await p;
   // prove that Drive really answers (also creates the backup folder)
   await B.listDriveBackups();
   await loadStatus();
+}
+
+// Google sent the user back (redirect sign-in): say what happened and finish what was pending.
+// 'restore' is continued by app.js (it needs the restore screen).
+export async function handleRedirectResult(r) {
+  if (!r) return;
+  if (r.pending !== 'restore') ctx.tab = 'backup'; // after a restore the user wants to see the shifts
+  if (!r.ok) {
+    toast(errText(r.code), { kind: 'err', ms: 7000 });
+    ctx.render();
+    return;
+  }
+  toast(T.bConnectedToast);
+  ctx.render();
+  try {
+    if (r.pending === 'backup') {
+      await runBackupNow({ interactive: false, manual: true });
+    } else if (r.pending === 'signin') {
+      // prove that Drive really answers (also creates the backup folder)
+      await B.listDriveBackups();
+      await loadStatus();
+    }
+  } catch (e) {
+    toast(errText((e && e.code) || 'error'), { kind: 'err', ms: 6000 });
+  }
+  ctx.render();
 }
 
 export function startAutoChecks() {

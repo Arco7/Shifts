@@ -4,9 +4,11 @@
 // Files you drop into the folder by hand are not visible to the app, but can always be
 // restored with "restore from file".
 //
-// Without a server Google gives a token that lives about 1 hour. When it expires, the next
-// upload opens the Google window (it normally closes by itself). The browser only allows that
-// window right after a tap, so it is requested inside the tap handler.
+// Without a server Google gives a token that lives about 1 hour. When it expires the user taps
+// once and signs in again. Two ways to sign in (CONFIG.SIGNIN_MODE):
+//   'redirect' (default): the whole page goes to Google and comes back with the token in the
+//                         address (works in the installed app, no popup needed);
+//   'popup': the Google Identity Services window (the browser allows it only right after a tap).
 
 import { CONFIG } from './config.js';
 
@@ -14,6 +16,8 @@ export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const SCOPES = `${DRIVE_SCOPE} https://www.googleapis.com/auth/userinfo.email`;
 const LS_TOKEN = 'shiftlog.gtoken';
 const LS_EMAIL = 'shiftlog.gemail';
+const LS_STATE = 'shiftlog.oauthstate';
+const LS_PENDING = 'shiftlog.pending';
 
 export class DriveError extends Error {
   constructor(code, message) {
@@ -31,9 +35,16 @@ const ls = () => {
   }
 };
 
-export function isConfigured() {
+// '' = fine, 'empty' = still the placeholder, 'bad' = pasted something that is not a Client ID
+// (a real one looks like 1234567890-abcdef.apps.googleusercontent.com; Google answers
+// "Client missing a project id" / invalid_client to anything else)
+export function clientIdProblem() {
   const id = CONFIG.GOOGLE_CLIENT_ID || '';
-  return id.length > 10 && !id.startsWith('PASTE');
+  if (!id || id.startsWith('PASTE')) return 'empty';
+  return /^\d{6,}-[a-z0-9_-]+\.apps\.googleusercontent\.com$/i.test(id) ? '' : 'bad';
+}
+export function isConfigured() {
+  return clientIdProblem() === '';
 }
 
 let gisPromise = null;
@@ -87,6 +98,86 @@ export function signOutLocal() {
   }
 }
 
+export function signInMode() {
+  return CONFIG.SIGNIN_MODE === 'popup' ? 'popup' : 'redirect';
+}
+
+// Exactly this address must be listed as "Authorized redirect URI" of the web client in Google Cloud.
+export function redirectUri() {
+  return new URL('./', import.meta.url).href;
+}
+
+// What to continue with after Google sends the user back: 'signin' | 'backup' | 'restore'.
+let intent = 'signin';
+export function expectIntent(name) {
+  intent = name;
+}
+
+function randomState() {
+  const a = new Uint8Array(16);
+  g().crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function startRedirectSignIn() {
+  const state = randomState();
+  const store = ls();
+  if (!store) throw new DriveError('storage_blocked');
+  store.setItem(LS_STATE, JSON.stringify({ state, at: Date.now() }));
+  store.setItem(LS_PENDING, intent);
+  intent = 'signin';
+  const q = new URLSearchParams({
+    client_id: CONFIG.GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri(),
+    response_type: 'token',
+    scope: SCOPES,
+    state,
+    include_granted_scopes: 'true',
+  });
+  const hint = accountEmail();
+  if (hint) q.set('login_hint', hint);
+  g().location.assign('https://accounts.google.com/o/oauth2/v2/auth?' + q.toString());
+}
+
+// Called once at start-up: if the address carries a Google answer (#access_token=...), take it,
+// remove it from the address bar and say what was pending. Returns null when there is none.
+export async function consumeRedirectResult() {
+  const loc = g().location;
+  const hash = loc && loc.hash ? loc.hash : '';
+  if (!hash.includes('access_token=') && !hash.includes('error=')) return null;
+  const params = new URLSearchParams(hash.replace(/^#/, ''));
+  try {
+    g().history.replaceState(null, '', loc.pathname + loc.search);
+  } catch {
+    /* ignore */
+  }
+  const store = ls();
+  let saved = null;
+  let pending = 'signin';
+  try {
+    saved = JSON.parse(store?.getItem(LS_STATE) || 'null');
+    pending = store?.getItem(LS_PENDING) || 'signin';
+    store?.removeItem(LS_STATE);
+    store?.removeItem(LS_PENDING);
+  } catch {
+    /* ignore */
+  }
+  if (!saved || !saved.state || saved.state !== params.get('state') || Date.now() - saved.at > 30 * 60000) {
+    return { ok: false, code: 'bad_state', pending };
+  }
+  if (params.get('error')) return { ok: false, code: params.get('error'), pending };
+  const token = params.get('access_token');
+  if (!token) return { ok: false, code: 'auth_error', pending };
+  if (!(params.get('scope') || '').includes(DRIVE_SCOPE)) return { ok: false, code: 'scope_denied', pending };
+  try {
+    store?.setItem(LS_TOKEN, JSON.stringify({ token, exp: Date.now() + (Number(params.get('expires_in')) || 3600) * 1000 }));
+  } catch {
+    return { ok: false, code: 'storage_blocked', pending };
+  }
+  await fetchEmail(token);
+  return { ok: true, pending };
+}
+
 let tokenInflight = null;
 
 // IMPORTANT: when there is no valid token this must be called synchronously from a tap
@@ -96,6 +187,15 @@ export function getToken({ interactive = false } = {}) {
   if (c) return Promise.resolve(c);
   if (!isConfigured()) return Promise.reject(new DriveError('not_configured'));
   if (!interactive) return Promise.reject(new DriveError('need_login'));
+  if (signInMode() === 'redirect') {
+    try {
+      startRedirectSignIn();
+    } catch (e) {
+      return Promise.reject(e instanceof DriveError ? e : new DriveError('redirect_failed', String(e)));
+    }
+    // the page is leaving for Google (or Google opens on top of the app): not an error
+    return Promise.reject(new DriveError('redirecting'));
+  }
   if (tokenInflight) return tokenInflight;
   const oauth = g().google?.accounts?.oauth2;
   if (!oauth) return Promise.reject(new DriveError('gis_not_loaded'));

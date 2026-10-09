@@ -1107,3 +1107,11 @@ p {
     transition: none !important;
   }
 }
+
+.redirect-uri {
+  margin-top: 4px;
+  font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+  color: var(--text);
+  word-break: break-all;
+  user-select: all;
+}

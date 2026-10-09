@@ -63,14 +63,20 @@ function parseOrToast(text) {
   }
 }
 
+const badId = () => drive.clientIdProblem() === 'bad';
+const notConfTitle = () => (badId() ? T.bBadClientIdTitle : T.bNotConfiguredTitle);
+const notConfText = () => (badId() ? T.bBadClientId : T.bNotConfiguredText);
+
 // MUST be called straight from a tap (Google sign-in may be needed)
 export function startRestoreFromDrive() {
   if (!drive.isConfigured()) {
-    toast(T.bNotConfiguredTitle, { kind: 'warn' });
+    toast(notConfTitle(), { kind: 'warn' });
     return;
   }
+  drive.expectIntent('restore');
   const listP = B.listDriveBackups({ interactive: true });
-  const body = h('div', { class: 'sheet-col' }, header(T.bRestorePick, () => sheet.close()), h('div', { class: 'sheet-scroll' }, h('div', { class: 'empty' }, T.loading)));
+  const loading = h('div', { class: 'empty' }, T.loading);
+  const body = h('div', { class: 'sheet-col' }, header(T.bRestorePick, () => sheet.close()), h('div', { class: 'sheet-scroll' }, loading));
   const sheet = openSheet(body, { full: true });
 
   const show = (list) => {
@@ -101,6 +107,12 @@ export function startRestoreFromDrive() {
     sheet.setContent(h('div', { class: 'sheet-col' }, header(T.bRestorePick, () => sheet.close()), h('div', { class: 'sheet-scroll' }, h('div', { class: 'card' }, rows))));
   };
   listP.then(show).catch((e) => {
+    if (errCode(e) === 'redirecting') {
+      // the page is on its way to Google: closing the sheet now would go "back" in history
+      // and cancel that trip, so just say what is happening
+      loading.textContent = errText('redirecting');
+      return;
+    }
     sheet.close();
     toast(errText(errCode(e)), { kind: 'err' });
   });
@@ -224,7 +236,7 @@ function targetCard(kind) {
   let status;
   if (d.code === 'ok') status = h('div', { class: 'status-line ok' }, icon('check', 18), T.bOk);
   else if (d.code === 'guard') status = h('div', { class: 'status-line warn' }, icon('alert', 18), T.bGuardShort);
-  else if (d.code === 'not_configured') status = h('div', { class: 'status-line bad' }, T.bNotConfiguredText);
+  else if (d.code === 'not_configured') status = h('div', { class: 'status-line bad' }, notConfText());
   else if (d.code === 'no_folder') status = h('div', { class: 'status-line muted' }, T.bFolderNone);
   else if (d.code === 'failed' || d.code === 'none') status = h('div', { class: 'status-line bad' }, icon('x', 18), d.text, d.sub ? h('div', { class: 'status-sub' }, d.sub) : null);
   else status = h('div', { class: 'status-line ' + d.level }, icon('alert', 18), d.sub);
@@ -241,7 +253,7 @@ function targetCard(kind) {
 
 function googleCard() {
   if (!drive.isConfigured()) {
-    return h('div', { class: 'card warn-card' }, h('div', { class: 'card-title' }, icon('alert', 20), T.bNotConfiguredTitle), h('p', { class: 'muted' }, T.bNotConfiguredText));
+    return h('div', { class: 'card warn-card' }, h('div', { class: 'card-title' }, icon('alert', 20), notConfTitle()), h('p', { class: 'muted' }, notConfText()));
   }
   const email = drive.accountEmail();
   const connected = !!drive.cachedToken();
@@ -250,6 +262,7 @@ function googleCard() {
     { class: 'card' },
     h('div', { class: 'card-title' }, icon('user', 20), T.bGoogle),
     h('div', { class: 'kv' }, h('span', { class: 'muted' }, connected ? T.bConnected : T.bNotConnected), email ? h('b', { dir: 'ltr' }, email) : null),
+    !connected && drive.signInMode() === 'redirect' ? h('div', { class: 'hint' }, T.bRedirectHint, h('div', { dir: 'ltr', class: 'redirect-uri' }, drive.redirectUri())) : null,
     h(
       'div',
       { class: 'btn-row' },
@@ -263,7 +276,7 @@ function googleCard() {
               await signInGoogle();
               toast(T.bConnectedToast);
             } catch (e) {
-              toast(errText(errCode(e)), { kind: 'err', ms: 6000 });
+              if (errCode(e) !== 'redirecting') toast(errText(errCode(e)), { kind: 'err', ms: 6000 });
             }
             ctx.render();
           },
@@ -438,7 +451,7 @@ export function backupScreen() {
       onclick: () => {
         // straight from the tap: sign-in to Google may have to start right here
         runBackupNow({ interactive: true, manual: true }).then((r) => {
-          if (!r) return;
+          if (!r || (r.drive && r.drive.code === 'redirecting')) return;
           const dOk = r.drive && r.drive.ok;
           const lOk = r.local && (r.local.ok || r.local.skipped);
           const parts = [];
