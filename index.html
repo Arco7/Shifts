@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>משמרות ושכר</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <main id="view"></main>
+      <nav id="nav" aria-label="ניווט"></nav>
+    </div>
+    <div id="sheets"></div>
+    <noscript>צריך להפעיל JavaScript</noscript>
+    <script>
+      // If something breaks on the phone, show the error text on the screen (so it can be sent for a fix).
+      (function () {
+        function show(msg) {
+          var box = document.getElementById('errbox');
+          if (!box) {
+            box = document.createElement('div');
+            box.id = 'errbox';
+            box.dir = 'ltr';
+            box.style.cssText = 'position:fixed;left:8px;right:8px;top:8px;z-index:9999;background:#5a0f12;color:#fff;border:1px solid #ff5d5d;border-radius:12px;padding:10px 12px;font:13px/1.35 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto';
+            var b = document.createElement('button');
+            b.textContent = 'x';
+            b.style.cssText = 'float:right;margin-left:8px;font-size:16px';
+            b.onclick = function () { box.remove(); };
+            box.appendChild(b);
+            document.body.appendChild(box);
+          }
+          box.appendChild(document.createTextNode(msg + '\n'));
+        }
+        window.addEventListener('error', function (e) {
+          show('ERROR: ' + e.message + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno);
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          show('PROMISE: ' + (r && r.message ? r.message : r));
+        });
+      })();
+    </script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
