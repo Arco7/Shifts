@@ -1,7 +1,7 @@
 // config.js: the only file you edit after the Google Cloud setup.
 export const CONFIG = {
   // Paste the "Client ID" from Google Cloud here (looks like 1234-abc.apps.googleusercontent.com).
-  GOOGLE_CLIENT_ID: 'PASTE_CLIENT_ID_HERE',
+  GOOGLE_CLIENT_ID: '8arkasha8@gmail.com',
   // Name of the visible folder in Google Drive. The app finds the folder by a hidden mark,
   // so renaming this later does not lose old backups.
   DRIVE_FOLDER: 'Shifts Backups',
