@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Shifts: privacy policy</title>
+    <style>
+      :root { --bg: #ffffff; --fg: #15171a; --muted: #5b6168; --accent: #0a8f86; --line: #dfe3e6; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #000000; --fg: #eceff1; --muted: #9aa3ab; --accent: #2fd4c6; --line: #2a2f34; } }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      main { max-width: 680px; margin: 0 auto; padding: 32px 16px 56px; }
+      h1 { font-size: 28px; margin: 0 0 4px; }
+      h2 { font-size: 18px; margin: 28px 0 6px; }
+      .lead { color: var(--muted); margin: 0 0 20px; }
+      a { color: var(--accent); }
+      ul { padding-left: 20px; }
+      footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Privacy policy</h1>
+      <p class="lead">Shifts, a personal shift and pay tracker. Last updated: October 9, 2026.</p>
+      <p><a href="about.html">About the app</a> &middot; <a href="./">Open the app</a></p>
+
+      <h2>Summary</h2>
+      <p>
+        Your shift records stay on your device and, if you turn backups on, in your own Google Drive and your own phone folder.
+        The developer has no server, receives none of your data, and shows no advertising or analytics.
+      </p>
+
+      <h2>What data the app handles</h2>
+      <ul>
+        <li><strong>Shift and pay data</strong> that you type in: dates, times, rates, notes, tips, expenses and settings.</li>
+        <li><strong>Your Google account email address</strong>, only to show which account is connected for backups.</li>
+        <li><strong>A temporary Google access token</strong> that lets the app write backup files while you are signed in.</li>
+      </ul>
+
+      <h2>Where the data is stored</h2>
+      <ul>
+        <li>On your device, in the browser storage of the installed web app (IndexedDB and local storage). The email address and access token are kept in this same local storage.</li>
+        <li>In backup files that you choose to create: in a folder named "Shifts Backups" in your own Google Drive, and in a folder you pick on your phone, plus any file you download manually.</li>
+      </ul>
+
+      <h2>How Google user data is used</h2>
+      <p>
+        The app requests two Google permissions. The first is <code>https://www.googleapis.com/auth/drive.file</code>, used only to create, read,
+        verify and remove backup files that the app itself created in your Drive. The app cannot see any other file in your Drive. The second is
+        <code>https://www.googleapis.com/auth/userinfo.email</code>, used only to display the connected account. Google user data is used for these
+        purposes only. It is not sold, not used for advertising, not shared with third parties, and not read by any person.
+      </p>
+      <p>
+        The app's use and transfer of information received from Google APIs adheres to the
+        <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+        including the Limited Use requirements.
+      </p>
+
+      <h2>Sharing</h2>
+      <p>
+        Nothing is sent to the developer or to any third party. The only network requests made by the app go directly from your device to Google
+        (sign-in and Drive) and to the host that serves the app files. This site is hosted on GitHub Pages and receives the standard web server
+        request information (such as your IP address) that any website receives when you load the app.
+      </p>
+
+      <h2>Retention and deletion</h2>
+      <ul>
+        <li>The app keeps up to 10 backup copies and removes older ones after a new copy is verified (in Google Drive, removed files go to the Drive trash).</li>
+        <li>You can delete the backups at any time by deleting the "Shifts Backups" folder in Google Drive, or the files in your phone folder.</li>
+        <li>You can revoke the app's access at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+        <li>Clearing the site data or uninstalling the app removes the data stored on the device.</li>
+      </ul>
+
+      <h2>Children</h2>
+      <p>The app is not directed at children and does not knowingly collect their data.</p>
+
+      <h2>Changes and contact</h2>
+      <p>
+        If this policy changes, the date above will be updated. For questions, contact the owner of the GitHub account that hosts this site
+        (the account name is the first part of this page's address).
+      </p>
+
+      <footer>Personal, non-commercial project.</footer>
+    </main>
+  </body>
+</html>

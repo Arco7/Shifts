@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Shifts: personal shift and pay tracker</title>
+    <style>
+      :root { --bg: #ffffff; --fg: #15171a; --muted: #5b6168; --accent: #0a8f86; --line: #dfe3e6; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #000000; --fg: #eceff1; --muted: #9aa3ab; --accent: #2fd4c6; --line: #2a2f34; } }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      main { max-width: 680px; margin: 0 auto; padding: 32px 16px 56px; }
+      h1 { font-size: 28px; margin: 0 0 4px; }
+      h2 { font-size: 18px; margin: 28px 0 6px; }
+      p, li { color: var(--fg); }
+      .lead { color: var(--muted); margin: 0 0 20px; }
+      a { color: var(--accent); }
+      ul { padding-left: 20px; }
+      footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Shifts</h1>
+      <p class="lead">A simple personal app for tracking work shifts and calculating hourly pay under Israeli labor rules, with automatic backups you control.</p>
+
+      <p><a href="./">Open the app</a> &middot; <a href="privacy.html">Privacy policy</a></p>
+
+      <h2>What it does</h2>
+      <ul>
+        <li>Records work shifts, sick days, days off and holidays for up to three jobs.</li>
+        <li>Calculates pay: overtime at 125% and 150%, Shabbat and holiday rates, sick-day pay, travel, tips and expenses. Every rate is a setting you can change, with history by month.</li>
+        <li>Works as an installable web app (PWA) with a Hebrew, right-to-left interface, and keeps working offline.</li>
+      </ul>
+
+      <h2>Backups (why the app asks for Google Drive access)</h2>
+      <p>
+        Your records are stored on your own device. To protect them from loss, the app can save backup files to a folder named
+        "Shifts Backups" in <strong>your own Google Drive</strong>, and to a folder you choose on your phone. For Drive it requests only the
+        <code>drive.file</code> permission, which lets the app see and manage only the files it created itself. It cannot read the rest of your Drive.
+        It also reads your Google account email address, only to show which account is connected.
+      </p>
+      <p>Backups can be restored from inside the app. See the <a href="privacy.html">privacy policy</a> for details on how data is handled.</p>
+
+      <footer>This is a personal, non-commercial project. There is no server, no advertising and no analytics.</footer>
+    </main>
+  </body>
+</html>
