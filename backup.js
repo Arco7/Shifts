@@ -5,7 +5,7 @@
 
 import { CONFIG } from './config.js';
 import * as drive from './drive.js';
-import { kvGet, kvSet } from './store.js';
+import { kvGet, kvSet, isEmptyDb } from './store.js';
 
 export const FORMAT = 'shiftlog-backup';
 export const VERSION = 1;
@@ -29,6 +29,64 @@ export function parseName(name) {
   return { kind: m[1], key: `${m[2]}${m[3]}${m[4]}${m[5]}${m[6]}${m[7]}`, date: new Date(+m[2], +m[3] - 1, +m[4], +m[5], +m[6], +m[7]), entries: +m[8], name };
 }
 
+// ---------- "what is not in the backup yet" ----------
+// A signature is one small number per record (every shift/day entry and every job with its settings),
+// made from the record's content. It is stored with the last backup and compared with the data as it
+// is now: the difference is the number of changes (added, edited, deleted) that no backup has yet.
+function canon(v) {
+  if (v === undefined) return 'null';
+  if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+  if (v && typeof v === 'object') {
+    return (
+      '{' +
+      Object.keys(v)
+        .filter((k) => v[k] !== undefined)
+        .sort()
+        .map((k) => JSON.stringify(k) + ':' + canon(v[k]))
+        .join(',') +
+      '}'
+    );
+  }
+  return JSON.stringify(v);
+}
+// cyrb53: a fast 53-bit text hash (not for secrets; only to notice that a record changed)
+function hash53(str) {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+export function makeSig(db) {
+  const sig = {};
+  // (prefixes keep a shift id and a job id apart, whatever they look like)
+  for (const e of db.entries) sig['e:' + e.id] = hash53(canon(e));
+  for (const j of db.jobs) sig['j:' + j.id] = hash53(canon(j));
+  return sig;
+}
+// {added, changed, removed, total} between the data now and a stored signature
+export function diffSig(db, sig) {
+  let added = 0;
+  let changed = 0;
+  let seen = 0;
+  const check = (key, rec) => {
+    if (!Object.prototype.hasOwnProperty.call(sig, key)) added++;
+    else {
+      seen++;
+      if (sig[key] !== hash53(canon(rec))) changed++;
+    }
+  };
+  for (const e of db.entries) check('e:' + e.id, e);
+  for (const j of db.jobs) check('j:' + j.id, j);
+  const removed = Object.keys(sig).length - seen;
+  return { added, changed, removed, total: added + changed + removed };
+}
+
 export function buildBackup(db, now = new Date(), kind = 'backup') {
   const counts = { entries: db.entries.length, jobs: db.jobs.length };
   const env = { format: FORMAT, version: VERSION, createdAt: now.toISOString(), rev: db.rev || 0, counts, data: db };
@@ -41,7 +99,22 @@ export function buildBackup(db, now = new Date(), kind = 'backup') {
     rev: db.rev || 0,
     createdAt: env.createdAt,
     bytes: new TextEncoder().encode(text).length,
+    sig: makeSig(db),
   };
+}
+
+// Before a backup: are there fewer records than in the last backup? The last backup of the same place
+// counts; when this place has none yet, the other place. Returns null when nothing is wrong.
+export function countDrop(status, kind, nowCount) {
+  const otherKind = kind === 'drive' ? 'local' : 'drive';
+  // (after a restore of an older, smaller copy `refEntries` still remembers the bigger number)
+  const count = (o) => (Number.isFinite(o.refEntries) ? o.refEntries : o.entries);
+  const has = (o) => o && Number.isFinite(count(o));
+  const own = status && status[kind] && status[kind].lastOk;
+  const other = status && status[otherKind] && status[otherKind].lastOk;
+  const ref = has(own) ? own : has(other) ? other : null;
+  if (!ref || nowCount >= count(ref)) return null;
+  return { before: count(ref), now: nowCount, at: ref.at, from: ref === own ? kind : otherKind };
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -361,12 +434,6 @@ export async function fetchDriveBackup(id, { interactive = false } = {}) {
 
 let inflight = null;
 let currentCtl = null;
-// called after the silent follow-up round finished, so the screen can reload the status
-let followUpHook = null;
-export function onFollowUp(fn) {
-  followUpHook = fn;
-}
-
 export function errorCode(e) {
   return (e && e.code) || 'error';
 }
@@ -393,34 +460,52 @@ function updateStatus(fn) {
   return run;
 }
 
-// Automatic and manual backup to Drive. Returns {at, built, drive, local: null, steps, manual}.
-// A call that arrives while a backup is running joins it. When the data changed during the run
-// (its revision number is higher) and the run succeeded, one more silent round saves the latest data.
+// Called after every change of the data: remembers since when there are changes that no Drive backup
+// has (the screen turns red when they are older than three days).
+export async function noteChange(db) {
+  await updateStatus((s) => {
+    const ok = s.drive.lastOk;
+    let dirty;
+    if (isEmptyDb(db)) dirty = false;
+    else if (!ok) dirty = true;
+    else if (ok.sig) dirty = diffSig(db, ok.sig).total > 0;
+    else dirty = (ok.rev || 0) < (db.rev || 0);
+    if (dirty) {
+      if (!s.drive.dirtySince) s.drive.dirtySince = new Date().toISOString();
+    } else delete s.drive.dirtySince;
+  });
+}
+
+// After a restore from a copy on Drive the data IS that copy: it counts as the last Drive backup,
+// so the screen does not claim that everything is unsaved.
+export async function markRestored(db, { at, name }) {
+  const sig = makeSig(db);
+  await updateStatus((s) => {
+    // an older, smaller copy must not lower the number the next backup is compared with
+    const prev = s.drive.lastOk;
+    const prevCount = prev ? (Number.isFinite(prev.refEntries) ? prev.refEntries : prev.entries) : 0;
+    const refEntries = Math.max(Number.isFinite(prevCount) ? prevCount : 0, db.entries.length);
+    s.drive.lastOk = { at, name, entries: db.entries.length, refEntries, rev: db.rev || 0, account: drive.accountEmail(), guard: null, ms: null, restored: true, sig };
+    delete s.drive.lastFail;
+    delete s.drive.dirtySince;
+  });
+}
+
+// Backup to Drive (only by a tap on the button, after a confirmation; nothing is automatic).
+// Returns {at, built, drive, local: null, steps, manual}. A call that arrives while a backup is
+// running joins it. Changes made while it runs are not lost: they simply stay "not in the backup yet"
+// (the screen counts them), and the next tap saves them.
 let runManual = false;
-let runRev = 0;
 export function runBackup(db, { interactive = false, manual = false } = {}) {
   if (inflight) {
     if (manual) runManual = true;
     return inflight;
   }
   runManual = manual;
-  runRev = db.rev || 0;
   const run = doRun(db, { interactive });
   inflight = run.finally(() => {
     inflight = null;
   });
-  // (registered after the line above, so it runs when `inflight` is already free)
-  run.then(
-    (r) => {
-      const latest = globalThis.__shiftlogDb || db;
-      if (!(r && r.drive && r.drive.ok) || (latest.rev || 0) <= runRev) return;
-      Promise.resolve()
-        .then(() => runBackup(latest, { interactive: false }))
-        .then(() => (followUpHook ? followUpHook() : null))
-        .catch(() => {});
-    },
-    () => {},
-  );
   return inflight;
 }
 
@@ -470,8 +555,12 @@ async function doRun(db, { interactive }) {
   }
   await updateStatus((status) => {
     if (d.ok) {
-      status.drive.lastOk = { at, name: built.name, entries: built.counts.entries, rev: built.rev, account: d.value.account, guard: d.value.guard || null, ms: steps.totalMs };
+      status.drive.lastOk = { at, name: built.name, entries: built.counts.entries, rev: built.rev, account: d.value.account, guard: d.value.guard || null, ms: steps.totalMs, sig: built.sig };
       delete status.drive.lastFail;
+      // changes made while the backup was running are not in it
+      const latest = globalThis.__shiftlogDb || db;
+      if (diffSig(latest, built.sig).total > 0) status.drive.dirtySince = at;
+      else delete status.drive.dirtySince;
     } else {
       const code = result.drive.code;
       // A silent run without a valid Google token is not a failure, it was simply not attempted:

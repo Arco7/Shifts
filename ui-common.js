@@ -13,6 +13,7 @@ export function describeTarget(kind) {
   let text = '';
   let sub = '';
   let short = '';
+  let oldNote = '';
   switch (s.code) {
     case 'ok':
       text = stamp;
@@ -22,11 +23,18 @@ export function describeTarget(kind) {
         short = sub;
       }
       break;
-    case 'pending':
+    case 'pending': {
+      // "N changes are not in the backup yet" (red when they are old)
+      const n = s.unsaved;
       text = stamp;
-      sub = s.needLogin ? T.bPendingLogin : T.bPending;
-      short = s.needLogin ? T.stripPendingLogin : T.stripPending;
+      sub = n == null ? T.bPendingAny : n === 1 ? T.bPendingOne : f(T.bPendingN, { n });
+      short = n == null ? T.stripPending : n === 1 ? T.stripPendingOne : f(T.stripPendingN, { n });
+      if (s.old) {
+        oldNote = f(T.bPendingOld, { d: s.days });
+        short = f(T.stripPendingOld, { t: short, d: s.days });
+      }
       break;
+    }
     case 'guard':
       text = stamp;
       sub = f(T.bGuard, { now: s.guard.now, before: s.guard.before });
@@ -48,7 +56,7 @@ export function describeTarget(kind) {
     default:
       text = '';
   }
-  return { ...s, label, text, sub, short };
+  return { ...s, label, text, sub, short, oldNote };
 }
 
 export function dot(level) {

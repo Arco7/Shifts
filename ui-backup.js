@@ -6,7 +6,7 @@ import * as B from './backup.js';
 import * as drive from './drive.js';
 import { APP_VERSION } from './version.js';
 import { isEmptyDb, kvSet } from './store.js';
-import { runBackupNow, runPhoneBackup, cancelRun, signInGoogle } from './autobackup.js';
+import { runBackupNow, runPhoneBackup, cancelRun, signInGoogle, loadStatus } from './autobackup.js';
 import { describeTarget, dot } from './ui-common.js';
 import { T, f, lri, errText, fmtStamp, fmtDMY } from './strings.js';
 
@@ -37,7 +37,7 @@ const secs = (ms) => f(T.pgSec, { n: (ms / 1000).toFixed(1) });
 
 // ---------- restore ----------
 
-async function applyRestore(newDb) {
+async function applyRestore(newDb, source = null) {
   // 1. safety copy of what is in the app now (kept on the phone, and on Drive when possible)
   if (!isEmptyDb(ctx.db)) {
     const built = await B.saveSafety(ctx.db);
@@ -49,15 +49,24 @@ async function applyRestore(newDb) {
   globalThis.__shiftlogDb = newDb;
   if (!ctx.db.jobs.some((j) => j.id === ctx.jobId)) ctx.jobId = ctx.db.jobs[0].id;
   ctx.editMode = false;
-  await commit({ tap: false });
+  await commit();
   await kvSet('started', true);
   ctx.started = true;
+  // restored from a copy on Drive: the data IS that copy, so it counts as the last Drive backup
+  if (source && source.kind === 'drive') {
+    try {
+      await B.markRestored(ctx.db, source);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+  await loadStatus();
   ctx.render();
   toast(f(T.bRestoreDone, { n: ctx.db.entries.length }));
 }
 
 // shows what was found and asks. Returns true when restored.
-async function confirmRestore(parsed, whenText) {
+async function confirmRestore(parsed, whenText, source = null) {
   const info = B.describeDb(parsed.db);
   const cur = B.describeDb(ctx.db);
   const details = h(
@@ -69,7 +78,7 @@ async function confirmRestore(parsed, whenText) {
   const ok = await confirmDialog({ title: f(T.bRestoreFound, { date: lri(whenText) }), text: T.bRestoreAsk, details, okText: T.bRestoreYes, cancelText: T.cancel, danger: cur.entries > 0 });
   if (!ok) return false;
   try {
-    await applyRestore(parsed.db);
+    await applyRestore(parsed.db, source);
     return true;
   } catch (e) {
     toast(`${T.bRestoreFail}: ${errText(errCode(e))}`, { kind: 'err' });
@@ -116,7 +125,7 @@ export function startRestoreFromDrive() {
                   const text = await B.fetchDriveBackup(it.id, { interactive: true });
                   const parsed = parseOrToast(text);
                   if (!parsed) return show(list);
-                  const done = await confirmRestore(parsed, fmtStamp(it.date.toISOString()));
+                  const done = await confirmRestore(parsed, fmtStamp(it.date.toISOString()), { kind: 'drive', at: it.date.toISOString(), name: it.name });
                   if (done) sheet.close();
                   else show(list);
                 } catch (e) {
@@ -307,7 +316,7 @@ function targetCard(kind, extra) {
   else if (d.code === 'guard') status = h('div', { class: 'status-line warn' }, icon('alert', 18), T.bGuardShort);
   else if (d.code === 'not_configured') status = h('div', { class: 'status-line bad' }, notConfText());
   else if (d.code === 'failed' || d.code === 'none') status = h('div', { class: 'status-line bad' }, icon('x', 18), d.text, d.sub ? h('div', { class: 'status-sub' }, d.sub) : null);
-  else status = h('div', { class: 'status-line ' + d.level }, icon('alert', 18), d.sub);
+  else status = h('div', { class: 'status-line ' + d.level }, icon('alert', 18), d.sub, d.oldNote ? h('div', { class: 'status-sub' }, d.oldNote) : null);
   return h(
     'div',
     { class: 'card target ' + d.level },
@@ -320,9 +329,21 @@ function targetCard(kind, extra) {
   );
 }
 
+// The one window before a backup. When there are fewer records than in the last backup it says so
+// (numbers and date) and asks "back up anyway?"; otherwise the usual short question.
+async function confirmBackup(kind) {
+  const drop = B.countDrop(ctx.status, kind, ctx.db.entries.length);
+  if (drop) {
+    const text = f(T.bDropText, { where: drop.from === 'drive' ? T.bDropWhereDrive : T.bDropWhereLocal, when: lri(fmtStamp(drop.at)), before: drop.before, now: drop.now });
+    return confirmDialog({ title: T.bDropTitle, text, okText: T.bDropYes, cancelText: T.cancel, danger: true });
+  }
+  if (kind === 'drive') return confirmDialog({ title: T.bConfirmDriveTitle, text: T.bConfirmDriveText, okText: T.bConfirmDriveYes, cancelText: T.cancel });
+  return confirmDialog({ title: T.bConfirmPhoneTitle, text: T.bConfirmPhoneText, okText: T.bConfirmPhoneYes, cancelText: T.cancel });
+}
+
 async function onDriveBackup() {
   if (isEmptyDb(ctx.db)) return toast(T.bEmptyNow, { kind: 'warn' });
-  const ok = await confirmDialog({ title: T.bConfirmDriveTitle, text: T.bConfirmDriveText, okText: T.bConfirmDriveYes, cancelText: T.cancel });
+  const ok = await confirmBackup('drive');
   if (!ok) return;
   // the confirm sheet steps back in the history; a trip to Google must not start in the middle of that
   await sheetsSettled();
@@ -334,7 +355,7 @@ async function onDriveBackup() {
 
 async function onPhoneBackup() {
   if (isEmptyDb(ctx.db)) return toast(T.bEmptyNow, { kind: 'warn' });
-  const ok = await confirmDialog({ title: T.bConfirmPhoneTitle, text: T.bConfirmPhoneText, okText: T.bConfirmPhoneYes, cancelText: T.cancel });
+  const ok = await confirmBackup('local');
   if (!ok) return;
   await sheetsSettled();
   await runPhoneBackup();
@@ -481,8 +502,12 @@ function guardNote() {
             class: 'btn',
             type: 'button',
             onclick: async () => {
+              // like every Drive backup: one confirmation first; the new size is accepted only after "yes"
+              const yes = await confirmBackup('drive');
+              if (!yes) return;
               await B.acceptSmallDb(ctx.db.entries.length);
               toast(T.bGuardAccepted);
+              await sheetsSettled();
               runBackupNow({ interactive: true, manual: true });
             },
           },

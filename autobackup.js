@@ -1,11 +1,11 @@
-// autobackup.js: when to back up, and what the screen shows about the backups.
+// autobackup.js: what the screen shows about the backups (and how a backup is started).
 //
-// Automatic backup (to Drive only) runs after a change (not more often than CONFIG.AUTO_GAP_MIN),
-// when the app opens, and when it comes back to the foreground. A silent run cannot open the Google
-// window (the browser only allows it right after a tap): then the screen asks for one tap.
-// The phone copy (a downloaded file) is never automatic: it is made only by its own button.
+// NOTHING is automatic: a backup to Drive is made only by the button "back up to Drive now" (always
+// after a confirmation), the phone copy only by its own button. Instead the screen reminds:
+// "N changes are not in the backup yet", yellow at first, red when the oldest unsaved change is
+// older than STALE_DAYS days. (A web page cannot back up by itself while it is closed, and a
+// half-working automatic backup was worse than none: nobody knew whether it had worked.)
 
-import { CONFIG } from './config.js';
 import * as B from './backup.js';
 import * as drive from './drive.js';
 import { isEmptyDb } from './store.js';
@@ -13,7 +13,8 @@ import { ctx } from './ctx.js';
 import { toast } from './dom.js';
 import { T, errText } from './strings.js';
 
-const gapMs = () => (CONFIG.AUTO_GAP_MIN || 180) * 60000;
+// unsaved changes older than this many days turn the reminder red
+export const STALE_DAYS = 3;
 
 export async function loadStatus() {
   const s = await B.getStatus();
@@ -22,17 +23,10 @@ export async function loadStatus() {
   ctx.status = s;
 }
 
-// the silent follow-up round (changes made during a backup) must also refresh the screen
-B.onFollowUp(async () => {
-  await loadStatus();
-  ctx.render?.();
-});
-
 // Progress of the running Drive backup: the screen shows the steps and a live timer.
-// A quiet automatic run shows nothing until it is past the sign-in step.
 B.onProgress((t) => {
   if (t.done) {
-    // every run ends here, also the silent follow-up rounds that no button is waiting for
+    // every run ends here
     ctx.progress = null;
     ctx.progressManual = false;
     ctx.render?.();
@@ -45,26 +39,60 @@ B.onProgress((t) => {
 
 export const isEnabled = (kind) => (kind === 'drive' ? drive.isConfigured() : true);
 
+// What is not in the last Drive backup yet: {dirty, n, since}. n = number of changed records
+// (added, edited, deleted), or null when it cannot be counted (the last backup was made by an older
+// version of the app and has no signature). null as a whole = nothing to compare with.
+let unsavedCache = null;
+export function unsavedInfo() {
+  const ok = (ctx.status.drive || {}).lastOk;
+  if (!ok || !ctx.db || isEmptyDb(ctx.db)) return null;
+  const c = unsavedCache;
+  let n;
+  let dirty;
+  if (c && c.db === ctx.db && c.rev === ctx.db.rev && c.at === ok.at) {
+    ({ n, dirty } = c);
+  } else {
+    if (ok.sig) {
+      n = B.diffSig(ctx.db, ok.sig).total;
+      dirty = n > 0;
+    } else {
+      n = null;
+      dirty = (ok.rev || 0) < (ctx.db.rev || 0);
+    }
+    unsavedCache = { db: ctx.db, rev: ctx.db.rev, at: ok.at, n, dirty };
+  }
+  // since when: the moment of the first unsaved change; if that was not noted, the time of the last backup
+  const since = dirty ? (ctx.status.drive || {}).dirtySince || ok.at : null;
+  return { dirty, n, since };
+}
+
+export const daysSince = (iso, now = Date.now()) => Math.floor((now - new Date(iso).getTime()) / 86400000);
+
 // what one backup target looks like right now
 // level: ok | warn | bad | off
 // The phone copy is made by hand now and then, so it never turns red or amber because of its age.
-export function targetState(kind) {
+export function targetState(kind, now = Date.now()) {
   const st = ctx.status[kind] || {};
   const enabled = isEnabled(kind);
   const lastOk = st.lastOk || null;
   const lastFail = st.lastFail || null;
   const empty = isEmptyDb(ctx.db);
   if (kind === 'local') {
-    const base = { kind, enabled: true, lastOk, lastFail: null, pending: false, needLogin: false, guard: null, level: 'ok', code: 'ok' };
+    const base = { kind, enabled: true, lastOk, lastFail: null, pending: false, guard: null, level: 'ok', code: 'ok' };
     return lastOk ? base : { ...base, level: 'off', code: 'none' };
   }
-  const pending = enabled && !empty && (!lastOk || (lastOk.rev || 0) < (ctx.db.rev || 0));
-  const base = { kind, enabled, lastOk, lastFail, pending, needLogin: false, guard: null, level: 'ok', code: 'ok' };
+  const u = !empty && lastOk ? unsavedInfo() : null;
+  const pending = enabled && !!u && u.dirty;
+  const base = { kind, enabled, lastOk, lastFail, pending, unsaved: u ? u.n : null, old: false, days: 0, guard: null, level: 'ok', code: 'ok' };
   if (!enabled) return { ...base, level: 'bad', code: 'not_configured' };
   if (!lastOk) return { ...base, level: empty ? 'off' : 'bad', code: 'none' };
   if (lastFail && lastFail.at > lastOk.at) return { ...base, level: 'bad', code: 'failed' };
   if (lastOk.guard) return { ...base, level: 'warn', code: 'guard', guard: lastOk.guard };
-  if (pending) return { ...base, level: 'warn', code: 'pending', needLogin: !drive.cachedToken() };
+  if (pending) {
+    const days = daysSince(u.since, now);
+    const old = now - new Date(u.since).getTime() > STALE_DAYS * 86400000;
+    return { ...base, level: old ? 'bad' : 'warn', code: 'pending', old, days };
+  }
   return base;
 }
 
@@ -73,36 +101,24 @@ export function worstLevel() {
   return targetState('drive').level;
 }
 
-// is a Drive backup needed, and how long to wait before it is allowed (ms)
-export function dueState(now = Date.now()) {
-  if (isEmptyDb(ctx.db)) return { need: false, wait: 0 };
-  if (!isEnabled('drive')) return { need: false, wait: 0 };
-  const ok = (ctx.status.drive || {}).lastOk;
-  if (ok && (ok.rev || 0) >= (ctx.db.rev || 0)) return { need: false, wait: 0 };
-  const wait = ok ? Math.max(0, gapMs() - (now - new Date(ok.at).getTime())) : 0;
-  return { need: true, wait };
-}
-
-let timer = null;
-
-export function requestAutoBackup({ fromTap = false } = {}) {
-  clearTimeout(timer);
-  timer = null;
-  const d = dueState();
-  if (!d.need) return;
-  if (d.wait > 0) {
-    timer = setTimeout(() => requestAutoBackup({ fromTap: false }), Math.min(d.wait + 1000, 2 ** 31 - 1));
-    return;
+// Called after every change of the data (from commit): note since when there is something unsaved,
+// then refresh the screen. Never starts a backup.
+export function onDataChanged() {
+  // (the screen is drawn right after this call: date the change in memory at once, so the first drawing
+  // does not count the unsaved change as old; the stored date follows)
+  const u = unsavedInfo();
+  if (u && u.dirty && !(ctx.status.drive || {}).dirtySince) {
+    ctx.status.drive = ctx.status.drive || {};
+    ctx.status.drive.dirtySince = new Date().toISOString();
   }
-  // The Google window may only open right after a tap, and only if the user signed in before.
-  // (Redirect sign-in would throw the whole page to Google after a plain save, so there the
-  // screen asks for a tap instead.)
-  const interactive = fromTap && drive.signInMode() === 'popup' && drive.isConfigured() && !drive.cachedToken() && !!drive.accountEmail();
-  runBackupNow({ interactive });
+  B.noteChange(ctx.db)
+    .then(() => loadStatus())
+    .then(() => ctx.render?.())
+    .catch((e) => console.error(e));
 }
 
-// Used by the button and by automatic backups. IMPORTANT: must be called straight from a tap
-// handler when `interactive` is true (nothing awaited before it, except the confirm dialog).
+// Used by the button (and to finish it after the trip to Google). IMPORTANT: must be called straight from
+// a tap handler when `interactive` is true (nothing awaited before it, except the confirm dialog).
 export function runBackupNow({ interactive = false, manual = false } = {}) {
   if (isEmptyDb(ctx.db)) {
     if (manual) toast(T.bEmptyNow, { kind: 'warn' });
@@ -209,13 +225,4 @@ export async function handleRedirectResult(r) {
     toast(errText((e && e.code) || 'error'), { kind: 'err', ms: 6000 });
   }
   ctx.render();
-}
-
-export function startAutoChecks() {
-  const check = () => requestAutoBackup({ fromTap: false });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') check();
-  });
-  setInterval(check, 5 * 60000);
-  check();
 }

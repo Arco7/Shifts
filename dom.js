@@ -81,8 +81,9 @@ const ICONS = {
 export function icon(name, size = 24, cls = '') {
   const svg = document.createElementNS(SVGNS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', String(size));
-  svg.setAttribute('height', String(size));
+  // sized in rem like everything else, so the one size knob in style.css scales the icons too
+  svg.style.width = `${size / 16}rem`;
+  svg.style.height = `${size / 16}rem`;
   svg.setAttribute('fill', 'none');
   svg.setAttribute('stroke', 'currentColor');
   svg.setAttribute('stroke-width', '2');

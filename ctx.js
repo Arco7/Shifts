@@ -22,7 +22,7 @@ export const ctx = {
   corrupt: false,
   corruptRaw: null,
   render: () => {},
-  afterCommit: (_opts) => {},
+  afterCommit: () => {},
 };
 
 export const job = () => ctx.db.jobs.find((j) => j.id === ctx.jobId) || ctx.db.jobs[0];
@@ -39,16 +39,15 @@ export function markHadData() {
 }
 
 // Every change of the data goes through here: mark changed, write to the phone storage,
-// start the automatic backup (inside the same tap, which Google sign-in needs).
-// opts.tap: false for changes that do not come straight from a tap (the Google window cannot open then)
-export async function commit(opts = {}) {
+// tell the backup reminder (it counts what is not in the backup yet; it never starts a backup).
+export async function commit() {
   const db = ctx.db;
   touch(db);
   globalThis.__shiftlogDb = db;
   const writing = writeDb(db);
   if (!isEmptyDb(db)) markHadData();
   try {
-    ctx.afterCommit({ fromTap: opts.tap !== false });
+    ctx.afterCommit();
   } catch (e) {
     console.error(e);
   }

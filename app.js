@@ -5,7 +5,7 @@ import { ctx } from './ctx.js';
 import { loadDb, emptyDb, isEmptyDb, requestPersist, kvGet } from './store.js';
 import { validateDb } from './backup.js';
 import { fmtDate } from './calc.js';
-import { loadStatus, worstLevel, requestAutoBackup, startAutoChecks, handleRedirectResult } from './autobackup.js';
+import { loadStatus, worstLevel, onDataChanged, handleRedirectResult } from './autobackup.js';
 import { shiftsScreen } from './ui-shifts.js';
 import { workScreen } from './ui-work.js';
 import { backupScreen, firstRunScreen, startRestoreFromDrive } from './ui-backup.js';
@@ -39,7 +39,7 @@ function renderNav(nav) {
       h(
         'button',
         { class: 'nav-item' + (on ? ' on' : ''), type: 'button', 'aria-current': on ? 'page' : null, onclick: () => goTab(id) },
-        h('span', { class: 'nav-ic' }, icon(ic, 26), id === 'backup' && (level === 'bad' || level === 'warn') ? h('span', { class: 'nav-dot ' + level }) : null),
+        h('span', { class: 'nav-ic' }, icon(ic, 23), id === 'backup' && (level === 'bad' || level === 'warn') ? h('span', { class: 'nav-dot ' + level }) : null),
         h('span', null, T[label]),
       ),
     );
@@ -73,7 +73,7 @@ export function render() {
 async function boot() {
   initSheets();
   ctx.render = render;
-  ctx.afterCommit = ({ fromTap }) => requestAutoBackup({ fromTap });
+  ctx.afterCommit = () => onDataChanged();
   ctx.month = fmtDate(new Date()).slice(0, 7);
 
   let db = null;
@@ -142,7 +142,6 @@ async function boot() {
   });
   // popup sign-in only: load the Google script early (the window must open straight from a tap)
   if (isConfigured() && signInMode() === 'popup') loadGis().catch(() => {});
-  startAutoChecks();
   document.addEventListener('visibilitychange', () => {
     // another window (the Google sign-in tab) may have changed the status meanwhile
     if (document.visibilityState === 'visible') loadStatus().then(() => render());
