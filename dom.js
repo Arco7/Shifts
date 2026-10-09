@@ -193,6 +193,19 @@ export function openSheet(content, opts = {}) {
 
 export const sheetDepth = () => stack.length;
 
+// Resolves when the history is quiet again after a sheet was closed. Going to Google (a page
+// change) while the browser is still stepping back in the history would cancel that trip.
+export function sheetsSettled() {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const tick = () => {
+      if (!backing || Date.now() - t0 > 900) resolve();
+      else setTimeout(tick, 30);
+    };
+    tick();
+  });
+}
+
 // ---------- confirm ----------
 export function confirmDialog({ title, text, okText = 'אישור', cancelText = 'ביטול', danger = false, details = null }) {
   return new Promise((resolve) => {

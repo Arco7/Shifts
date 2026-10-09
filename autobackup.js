@@ -1,8 +1,9 @@
 // autobackup.js: when to back up, and what the screen shows about the backups.
 //
-// Automatic backup runs after a change (not more often than CONFIG.AUTO_GAP_MIN), when the
-// app opens, and when it comes back to the foreground. A silent run cannot open the Google
+// Automatic backup (to Drive only) runs after a change (not more often than CONFIG.AUTO_GAP_MIN),
+// when the app opens, and when it comes back to the foreground. A silent run cannot open the Google
 // window (the browser only allows it right after a tap): then the screen asks for one tap.
+// The phone copy (a downloaded file) is never automatic: it is made only by its own button.
 
 import { CONFIG } from './config.js';
 import * as B from './backup.js';
@@ -27,61 +28,59 @@ B.onFollowUp(async () => {
   ctx.render?.();
 });
 
-export async function refreshLocalPerm() {
-  if (!ctx.localDir) {
-    ctx.localPerm = null;
+// Progress of the running Drive backup: the screen shows the steps and a live timer.
+// A quiet automatic run shows nothing until it is past the sign-in step.
+B.onProgress((t) => {
+  if (t.done) {
+    // every run ends here, also the silent follow-up rounds that no button is waiting for
+    ctx.progress = null;
+    ctx.progressManual = false;
+    ctx.render?.();
     return;
   }
-  try {
-    ctx.localPerm = await ctx.localDir.queryPermission({ mode: 'readwrite' });
-  } catch {
-    ctx.localPerm = null;
-  }
-}
+  if (!ctx.progressManual && t.index < t.keys.indexOf('folder')) return;
+  ctx.progress = t;
+  ctx.render?.();
+});
 
-export const isEnabled = (kind) => (kind === 'drive' ? drive.isConfigured() : !!ctx.localDir);
+export const isEnabled = (kind) => (kind === 'drive' ? drive.isConfigured() : true);
 
 // what one backup target looks like right now
 // level: ok | warn | bad | off
+// The phone copy is made by hand now and then, so it never turns red or amber because of its age.
 export function targetState(kind) {
   const st = ctx.status[kind] || {};
   const enabled = isEnabled(kind);
   const lastOk = st.lastOk || null;
   const lastFail = st.lastFail || null;
   const empty = isEmptyDb(ctx.db);
+  if (kind === 'local') {
+    const base = { kind, enabled: true, lastOk, lastFail: null, pending: false, needLogin: false, guard: null, level: 'ok', code: 'ok' };
+    return lastOk ? base : { ...base, level: 'off', code: 'none' };
+  }
   const pending = enabled && !empty && (!lastOk || (lastOk.rev || 0) < (ctx.db.rev || 0));
   const base = { kind, enabled, lastOk, lastFail, pending, needLogin: false, guard: null, level: 'ok', code: 'ok' };
-  if (!enabled) return { ...base, level: kind === 'drive' ? 'bad' : 'off', code: kind === 'drive' ? 'not_configured' : 'no_folder' };
-  if (kind === 'local' && ctx.localPerm && ctx.localPerm !== 'granted') return { ...base, level: 'warn', code: 'permission' };
+  if (!enabled) return { ...base, level: 'bad', code: 'not_configured' };
   if (!lastOk) return { ...base, level: empty ? 'off' : 'bad', code: 'none' };
   if (lastFail && lastFail.at > lastOk.at) return { ...base, level: 'bad', code: 'failed' };
   if (lastOk.guard) return { ...base, level: 'warn', code: 'guard', guard: lastOk.guard };
-  if (pending) return { ...base, level: 'warn', code: 'pending', needLogin: kind === 'drive' && !drive.cachedToken() };
+  if (pending) return { ...base, level: 'warn', code: 'pending', needLogin: !drive.cachedToken() };
   return base;
 }
 
-const RANK = { off: 0, ok: 1, warn: 2, bad: 3 };
+// the warning dot on the backup tab follows the Drive backup only
 export function worstLevel() {
-  const a = targetState('drive');
-  const b = targetState('local');
-  return RANK[a.level] >= RANK[b.level] ? a.level : b.level;
+  return targetState('drive').level;
 }
 
-// is a backup needed, and how long to wait before it is allowed (ms)
+// is a Drive backup needed, and how long to wait before it is allowed (ms)
 export function dueState(now = Date.now()) {
   if (isEmptyDb(ctx.db)) return { need: false, wait: 0 };
-  let need = false;
-  let wait = Infinity;
-  for (const kind of ['drive', 'local']) {
-    if (!isEnabled(kind)) continue;
-    const ok = (ctx.status[kind] || {}).lastOk;
-    if (!ok || (ok.rev || 0) < (ctx.db.rev || 0)) {
-      need = true;
-      const w = ok ? gapMs() - (now - new Date(ok.at).getTime()) : 0;
-      wait = Math.min(wait, Math.max(0, w));
-    }
-  }
-  return { need, wait: need ? wait : 0 };
+  if (!isEnabled('drive')) return { need: false, wait: 0 };
+  const ok = (ctx.status.drive || {}).lastOk;
+  if (ok && (ok.rev || 0) >= (ctx.db.rev || 0)) return { need: false, wait: 0 };
+  const wait = ok ? Math.max(0, gapMs() - (now - new Date(ok.at).getTime())) : 0;
+  return { need: true, wait };
 }
 
 let timer = null;
@@ -103,7 +102,7 @@ export function requestAutoBackup({ fromTap = false } = {}) {
 }
 
 // Used by the button and by automatic backups. IMPORTANT: must be called straight from a tap
-// handler when `interactive` is true (nothing awaited before it).
+// handler when `interactive` is true (nothing awaited before it, except the confirm dialog).
 export function runBackupNow({ interactive = false, manual = false } = {}) {
   if (isEmptyDb(ctx.db)) {
     if (manual) toast(T.bEmptyNow, { kind: 'warn' });
@@ -111,14 +110,30 @@ export function runBackupNow({ interactive = false, manual = false } = {}) {
   }
   globalThis.__shiftlogDb = ctx.db;
   if (interactive) drive.expectIntent('backup');
-  const p = B.runBackup(ctx.db, { interactive }); // starts Google sign-in synchronously when needed
+  if (manual) ctx.progressManual = true;
+  const p = B.runBackup(ctx.db, { interactive, manual }); // starts Google sign-in synchronously when needed
   ctx.busy = true;
   ctx.render();
   return p
     .then(async (r) => {
       await loadStatus();
+      const code = r && r.drive && r.drive.code;
       // on its way to Google: the real result comes after the user is back
-      ctx.lastResult = r && r.drive && r.drive.code === 'redirecting' ? null : { ...r, manual, shownAt: Date.now() };
+      ctx.lastResult =
+        code === 'redirecting'
+          ? null
+          : {
+              kind: 'drive',
+              ok: !!(r.drive && r.drive.ok),
+              code,
+              at: r.at,
+              steps: r.steps,
+              entries: r.built.counts.entries,
+              name: r.built.name,
+              rotated: r.drive && r.drive.rotated,
+              manual: !!r.manual || manual,
+              shownAt: Date.now(),
+            };
       return r;
     })
     .catch((e) => {
@@ -127,8 +142,36 @@ export function runBackupNow({ interactive = false, manual = false } = {}) {
     })
     .finally(() => {
       ctx.busy = false;
+      ctx.progress = null;
+      ctx.progressManual = false;
       ctx.render();
     });
+}
+
+// The user presses "cancel" while the backup is running.
+export function cancelRun() {
+  B.cancelBackup();
+}
+
+// The phone copy: one tap = one downloaded file.
+export async function runPhoneBackup() {
+  if (isEmptyDb(ctx.db)) {
+    toast(T.bEmptyNow, { kind: 'warn' });
+    return null;
+  }
+  try {
+    const r = await B.backupToPhone(ctx.db);
+    await loadStatus();
+    ctx.lastPhone = { ...r, shownAt: Date.now() };
+    toast(T.bPhoneDownloaded);
+    return r;
+  } catch (e) {
+    ctx.lastPhone = { ok: false, code: (e && e.code) || 'error', shownAt: Date.now() };
+    toast(errText((e && e.code) || 'error'), { kind: 'err' });
+    return null;
+  } finally {
+    ctx.render();
+  }
 }
 
 export async function signInGoogle() {
@@ -144,6 +187,8 @@ export async function signInGoogle() {
 // 'restore' is continued by app.js (it needs the restore screen).
 export async function handleRedirectResult(r) {
   if (!r) return;
+  // the silent try did not work and the page is going to Google again, the normal way
+  if (r.code === 'redirecting') return;
   if (r.pending !== 'restore') ctx.tab = 'backup'; // after a restore the user wants to see the shifts
   if (!r.ok) {
     toast(errText(r.code), { kind: 'err', ms: 7000 });

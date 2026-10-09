@@ -19,6 +19,11 @@ const LS_EMAIL = 'shiftlog.gemail';
 const LS_STATE = 'shiftlog.oauthstate';
 const LS_PENDING = 'shiftlog.pending';
 
+// Every request to Google has a time limit: one stuck request must never freeze the backup.
+export const LIMITS = { request: 30000, upload: 60000 };
+// Answers of Google to a silent sign-in (prompt=none) that mean "I need to show something".
+const SILENT_NEEDS_USER = ['interaction_required', 'login_required', 'consent_required', 'account_selection_required'];
+
 export class DriveError extends Error {
   constructor(code, message) {
     super(message || code);
@@ -119,12 +124,19 @@ function randomState() {
   return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function startRedirectSignIn() {
+// Silent sign-in: the same trip to Google, but Google must not show anything (prompt=none).
+// It works when the account is already signed in on the phone and has agreed before; otherwise
+// Google sends the page back with an error and we repeat the trip the normal way (see below).
+export function silentSignInWanted() {
+  return CONFIG.SILENT_SIGNIN !== false && !!accountEmail();
+}
+
+function startRedirectSignIn({ silent = false, pendingName = null } = {}) {
   const state = randomState();
   const store = ls();
   if (!store) throw new DriveError('storage_blocked');
-  store.setItem(LS_STATE, JSON.stringify({ state, at: Date.now() }));
-  store.setItem(LS_PENDING, intent);
+  store.setItem(LS_STATE, JSON.stringify({ state, at: Date.now(), silent }));
+  store.setItem(LS_PENDING, pendingName || intent);
   intent = 'signin';
   const q = new URLSearchParams({
     client_id: CONFIG.GOOGLE_CLIENT_ID,
@@ -136,6 +148,7 @@ function startRedirectSignIn() {
   });
   const hint = accountEmail();
   if (hint) q.set('login_hint', hint);
+  if (silent) q.set('prompt', 'none');
   g().location.assign('https://accounts.google.com/o/oauth2/v2/auth?' + q.toString());
 }
 
@@ -144,10 +157,14 @@ function startRedirectSignIn() {
 export async function consumeRedirectResult() {
   const loc = g().location;
   const hash = loc && loc.hash ? loc.hash : '';
-  if (!hash.includes('access_token=') && !hash.includes('error=')) return null;
-  const params = new URLSearchParams(hash.replace(/^#/, ''));
+  const search = loc && loc.search ? loc.search : '';
+  let raw = '';
+  if (hash.includes('access_token=') || hash.includes('error=')) raw = hash;
+  else if (search.includes('error=') && search.includes('state=')) raw = search; // some errors come in the query
+  if (!raw) return null;
+  const params = new URLSearchParams(raw.replace(/^[#?]/, ''));
   try {
-    g().history.replaceState(null, '', loc.pathname + loc.search);
+    g().history.replaceState(null, '', loc.pathname + (raw === hash ? loc.search : ''));
   } catch {
     /* ignore */
   }
@@ -165,7 +182,19 @@ export async function consumeRedirectResult() {
   if (!saved || !saved.state || saved.state !== params.get('state') || Date.now() - saved.at > 30 * 60000) {
     return { ok: false, code: 'bad_state', pending };
   }
-  if (params.get('error')) return { ok: false, code: params.get('error'), pending };
+  const err = params.get('error');
+  if (err) {
+    if (saved.silent && SILENT_NEEDS_USER.includes(err)) {
+      // the silent try did not work: now the normal sign-in (it is never silent, so no loop)
+      try {
+        startRedirectSignIn({ silent: false, pendingName: pending });
+        return { ok: false, code: 'redirecting', pending };
+      } catch (e) {
+        return { ok: false, code: (e && e.code) || 'redirect_failed', pending };
+      }
+    }
+    return { ok: false, code: err, pending };
+  }
   const token = params.get('access_token');
   if (!token) return { ok: false, code: 'auth_error', pending };
   if (!(params.get('scope') || '').includes(DRIVE_SCOPE)) return { ok: false, code: 'scope_denied', pending };
@@ -174,7 +203,7 @@ export async function consumeRedirectResult() {
   } catch {
     return { ok: false, code: 'storage_blocked', pending };
   }
-  await fetchEmail(token);
+  await emailWithin(token);
   return { ok: true, pending };
 }
 
@@ -189,7 +218,7 @@ export function getToken({ interactive = false } = {}) {
   if (!interactive) return Promise.reject(new DriveError('need_login'));
   if (signInMode() === 'redirect') {
     try {
-      startRedirectSignIn();
+      startRedirectSignIn({ silent: silentSignInWanted() });
     } catch (e) {
       return Promise.reject(e instanceof DriveError ? e : new DriveError('redirect_failed', String(e)));
     }
@@ -200,7 +229,7 @@ export function getToken({ interactive = false } = {}) {
   const oauth = g().google?.accounts?.oauth2;
   if (!oauth) return Promise.reject(new DriveError('gis_not_loaded'));
 
-  tokenInflight = new Promise((resolve, reject) => {
+  const p = new Promise((resolve, reject) => {
     try {
       const cfg = {
         client_id: CONFIG.GOOGLE_CLIENT_ID,
@@ -234,44 +263,91 @@ export function getToken({ interactive = false } = {}) {
     } catch (e) {
       reject(new DriveError('gis_error', String(e)));
     }
-  }).finally(() => {
-    tokenInflight = null;
   });
-  return tokenInflight;
+  tokenInflight = p;
+  const clear = () => {
+    if (tokenInflight === p) tokenInflight = null;
+  };
+  p.then(clear, clear);
+  return p;
 }
 
+// The user gave up (cancel / time limit) while the Google window was open: the next tap must open a
+// new window instead of waiting for the old one. A late answer of the old window is still stored.
+export function abandonSignIn() {
+  tokenInflight = null;
+}
+
+// The address is only a convenience (shown on screen, used as the sign-in hint): it has its own time
+// limit and nothing waits for it for long.
 async function fetchEmail(token) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
   try {
-    const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${token}` } });
+    const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${token}` }, signal: ctl.signal });
     if (!r.ok) return;
     const j = await r.json();
     if (j.email) ls()?.setItem(LS_EMAIL, j.email);
   } catch {
     /* ignore */
+  } finally {
+    clearTimeout(timer);
   }
 }
+// wait for the address, but at most this long (the start of the app must not hang on it)
+const EMAIL_WAIT_MS = 2500;
+function emailWithin(token) {
+  let t;
+  const wait = new Promise((r) => {
+    t = setTimeout(r, EMAIL_WAIT_MS);
+  });
+  return Promise.race([fetchEmail(token), wait]).finally(() => clearTimeout(t));
+}
 
-async function api(token, url, { method = 'GET', body, headers } = {}) {
-  let r;
+// While a backup runs the user can cancel it: every request of that run listens to this signal.
+let runSignal = null;
+export function setRunSignal(signal) {
+  runSignal = signal || null;
+}
+
+// One request with a time limit. The whole answer (also the body) must arrive in time.
+async function api(token, url, { method = 'GET', body, headers, timeoutMs = LIMITS.request } = {}) {
+  const ctl = new AbortController();
+  let why = '';
+  const timer = setTimeout(() => {
+    why = 'timeout';
+    ctl.abort();
+  }, timeoutMs);
+  const sig = runSignal;
+  const onCancel = () => {
+    why = why || 'cancelled';
+    ctl.abort();
+  };
+  if (sig) {
+    if (sig.aborted) onCancel();
+    else sig.addEventListener('abort', onCancel, { once: true });
+  }
   try {
-    r = await fetch(url, { method, body, headers: { Authorization: `Bearer ${token}`, ...(headers || {}) } });
-  } catch {
-    throw new DriveError('offline', 'no connection');
-  }
-  if (r.status === 401) {
-    clearToken();
-    throw new DriveError('unauthorized');
-  }
-  if (!r.ok) {
-    let t = '';
+    let r;
+    let text;
     try {
-      t = (await r.text()).slice(0, 300);
+      r = await fetch(url, { method, body, headers: { Authorization: `Bearer ${token}`, ...(headers || {}) }, signal: ctl.signal });
+      text = await r.text();
     } catch {
-      /* ignore */
+      if (why === 'timeout') throw new DriveError('timeout', 'no answer in time');
+      if (why === 'cancelled') throw new DriveError('cancelled');
+      throw new DriveError('offline', 'no connection');
     }
-    throw new DriveError('http_' + r.status, t);
+    if (r.status === 401) {
+      clearToken();
+      throw new DriveError('unauthorized');
+    }
+    if (!r.ok) throw new DriveError('http_' + r.status, text.slice(0, 300));
+    return { ok: true, status: r.status, text: async () => text, json: async () => JSON.parse(text) };
+  } finally {
+    clearTimeout(timer);
+    if (sig) sig.removeEventListener('abort', onCancel);
   }
-  return r;
 }
 
 const FILES = 'https://www.googleapis.com/drive/v3/files';
@@ -314,6 +390,7 @@ export async function uploadFile(token, { name, parent, text, kind }) {
     method: 'POST',
     headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
     body,
+    timeoutMs: LIMITS.upload,
   });
   return r.json();
 }

@@ -1115,3 +1115,262 @@ p {
   word-break: break-all;
   user-select: all;
 }
+
+/* ---------- compact date / time fields (entry sheet) ---------- */
+.dt-row.compact {
+  min-height: 0;
+  padding: 10px 14px;
+  gap: 8px;
+}
+.dt-row.compact .dt-label {
+  flex-direction: row;
+  min-width: 0;
+  gap: 8px;
+  font-size: 16px;
+}
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+}
+.dtchip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: rgba(31, 209, 192, 0.12);
+  border: 1px solid rgba(31, 209, 192, 0.35);
+  color: var(--accent);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.dtchip.date {
+  min-width: 152px;
+  justify-content: center;
+}
+.dtchip.time {
+  min-width: 82px;
+  justify-content: center;
+}
+.dtchip small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  direction: rtl;
+}
+.dtchip b {
+  font-weight: 700;
+}
+.dtchip-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dtchip-native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  font-size: 16px; /* no zoom when the phone opens it */
+  cursor: pointer;
+}
+.dur-line {
+  min-height: 20px;
+  padding: 0 6px;
+  font-size: 15px;
+  color: var(--muted);
+}
+.dur-line.warn {
+  color: var(--warn);
+}
+.dur-line.bad {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+/* time wheel (24 hours) */
+.timepick .wheels {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+.wheel-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.wheel {
+  position: relative;
+  width: 92px;
+  height: 220px; /* five rows of 44px */
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  border-radius: 14px;
+  background: #0b0d10;
+  border: 1px solid var(--line);
+}
+.wheel::-webkit-scrollbar {
+  display: none;
+}
+.wheel-pad {
+  height: 88px; /* two rows, so the first and the last row can stand in the middle */
+}
+.wheel-item {
+  height: 44px;
+  line-height: 44px;
+  text-align: center;
+  font-size: 22px;
+  color: var(--muted);
+  scroll-snap-align: center;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.wheel-item.on {
+  color: var(--accent);
+  font-weight: 800;
+  background: rgba(31, 209, 192, 0.14);
+}
+.colon {
+  font-size: 30px;
+  padding-bottom: 86px;
+}
+
+/* ---------- backup progress ---------- */
+.card-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 17px;
+}
+.pg-head span {
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pbar {
+  display: flex;
+  gap: 4px;
+  direction: ltr;
+}
+.pbar i {
+  flex: 1;
+  height: 10px;
+  border-radius: 6px;
+  background: #232830;
+}
+.pbar i.done {
+  background: var(--accent);
+}
+.pbar i.run {
+  background: linear-gradient(90deg, #232830 0%, var(--accent) 50%, #232830 100%);
+  background-size: 200% 100%;
+  animation: sweep 1.1s linear infinite;
+}
+@keyframes sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+.pg-list {
+  display: flex;
+  flex-direction: column;
+}
+.pg-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  color: var(--muted);
+  font-size: 16px;
+}
+.pg-row.done {
+  color: var(--text);
+}
+.pg-row.run {
+  color: var(--accent);
+  font-weight: 700;
+}
+.pg-ic {
+  width: 20px;
+  display: inline-flex;
+  justify-content: center;
+}
+.pg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a424d;
+}
+.pg-label {
+  flex: 1;
+}
+.pg-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+.pg-slow {
+  color: var(--warn);
+  font-size: 15px;
+}
+.pg-slow[hidden] {
+  display: none;
+}
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 15px;
+}
+.step-times {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 14px;
+}
+.st-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.st-row.bad {
+  color: var(--bad);
+}
+.help p {
+  margin: 4px 0 0;
+  line-height: 1.55;
+}
+.help-sec {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.help-sec b {
+  color: var(--accent);
+}

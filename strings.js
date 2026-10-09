@@ -117,7 +117,18 @@ export const T = {
   pvSkipped: 'דולגו {n} (שישי/שבת)',
   errEndBeforeStart: 'היציאה חייבת להיות אחרי הכניסה',
   errBadTime: 'חסר זמן כניסה או יציאה',
-  errLong: 'המשמרת ארוכה מ-24 שעות. לשמור בכל זאת?',
+  errTooLong: 'משמרת לא יכולה להיות ארוכה מ-24 שעות',
+  confirmLongShift: 'המשמרת ארוכה: {d}. זה נכון?',
+  confirmOddDate: 'התאריך נראה חריג: {date}. זה נכון?',
+  confirmLongRange: 'הטווח ארוך: {n} ימים. זה נכון?',
+  durLine: 'משך המשמרת: {d}',
+  durLong: 'משמרת ארוכה מהרגיל: {d}',
+  durTooLong: 'ארוכה מ-24 שעות. לא תישמר.',
+  durBad: 'היציאה חייבת להיות אחרי הכניסה',
+  timePick: 'בחירת שעה',
+  timeHours: 'שעות',
+  timeMinutes: 'דקות',
+  pickDate: 'בחירת תאריך',
   errRange: 'תאריך הסיום מוקדם מתאריך ההתחלה',
   errRangeLong: 'טווח ארוך מדי (מעל 120 יום)',
   errNoDate: 'חסר תאריך',
@@ -212,12 +223,13 @@ export const T = {
   backupTitle: 'גיבוי',
   bLast: 'גיבוי אחרון',
   bDrive: 'Google Drive',
-  bPhone: 'טלפון',
+  bPhone: 'טלפון (קובץ)',
   bNone: 'עדיין לא נעשה גיבוי',
+  bPhoneNone: 'עדיין לא הורד קובץ גיבוי',
   bOff: 'לא מוגדר',
   bOk: 'מגובה',
   bPending: 'יש שינויים שעדיין לא גובו',
-  bPendingLogin: 'יש שינויים שלא גובו. לחץ "גבה עכשיו" (נדרש חיבור ל-Google)',
+  bPendingLogin: 'יש שינויים שלא גובו. לחץ "גבה ל-Drive עכשיו" (נדרש חיבור ל-Google)',
   bFailed: 'לא הועלה',
   bFailedPhone: 'לא נשמר בטלפון',
   bLastSuccess: 'הצלחה אחרונה',
@@ -228,6 +240,8 @@ export const T = {
   bGuardAccept: 'הכמות נכונה, להמשיך כרגיל',
   bGuardAccepted: 'בסדר, ממשיכים כרגיל',
   bNow: 'גבה עכשיו',
+  bNowDrive: 'גבה ל-Drive עכשיו',
+  bNowPhone: 'גבה לטלפון (הורדת קובץ)',
   bBusy: 'מגבה…',
   bResult: 'תוצאה',
   bDriveOk: 'Drive ✓',
@@ -247,7 +261,7 @@ export const T = {
   bDisconnect: 'התנתקות',
   bConnectedToast: 'התחברת ל-Google',
   bNotConfiguredTitle: 'Drive עדיין לא הוגדר',
-  bNotConfiguredText: 'כדי לגבות ל-Google Drive צריך להדביק Client ID בקובץ config.js (ההוראות במדריך). בינתיים אפשר לגבות לתיקייה בטלפון.',
+  bNotConfiguredText: 'כדי לגבות ל-Google Drive צריך להדביק Client ID בקובץ config.js (ההוראות במדריך). בינתיים אפשר להוריד קובץ גיבוי לטלפון.',
   bRedirectHint: 'כתובת החזרה (Redirect URI) שצריך להוסיף ב-Google Cloud:',
   bBadClientIdTitle: 'ה-Client ID לא תקין',
   bBadClientId: 'ה-Client ID בקובץ config.js לא נראה תקין. הוא צריך להיראות כך: 1234567890-abcdef.apps.googleusercontent.com (בלי רווחים ובלי תוספות). בדוק שהעתקת את ה-Client ID עצמו ולא את שם הפרויקט או המספר שלו.',
@@ -285,8 +299,56 @@ export const T = {
   bStorage: 'אחסון בטלפון',
   bPersistOk: 'מוגן מפני ניקוי אוטומטי',
   bPersistNo: 'לא מוגן: הדפדפן עלול לנקות נתונים כשנגמר מקום. הגיבוי חשוב.',
-  bAuto: 'גיבוי אוטומטי אחרי שינויים (לא יותר מפעם בכמה שעות), ובפתיחה של האפליקציה. הכפתור "גבה עכשיו" תמיד עובד.',
+  bAuto: 'גיבוי אוטומטי ל-Drive אחרי שינויים (לא יותר מפעם בכמה שעות), ובפתיחה של האפליקציה. הכפתור "גבה ל-Drive עכשיו" תמיד עובד. גיבוי לטלפון נעשה רק ידנית.',
   bVersion: 'גרסה {v}',
+
+  // backup: two buttons, confirmation, progress, result
+  bConfirmDriveTitle: 'לגבות ל-Drive עכשיו?',
+  bConfirmDriveText: 'הקובץ יועלה ל-Drive ויבדק. זה לוקח כמה שניות.',
+  bConfirmDriveYes: 'גבה',
+  bConfirmPhoneTitle: 'להוריד קובץ גיבוי לטלפון?',
+  bConfirmPhoneText: 'הקובץ יישמר בתיקיית ההורדות של הטלפון.',
+  bConfirmPhoneYes: 'הורדה',
+  bPhoneDownloaded: 'הקובץ נשלח להורדה. כדאי לוודא בתיקיית ההורדות',
+  bPhoneNote: 'הקובץ נשמר בתיקיית ההורדות. האפליקציה לא יכולה לבדוק אותו ולא מוחקת קבצים ישנים. מומלץ לעשות את זה מדי פעם, כגיבוי נוסף.',
+  bPhoneUnverified: 'הקובץ נשלח להורדה (האפליקציה לא יכולה לבדוק שהוא נשמר)',
+  bVerifiedDrive: 'נבדק ב-Drive: הקובץ נקרא חזרה והושווה',
+  pgTitle: 'מגבה ל-Drive',
+  pgStep: 'שלב {n} מתוך {m}',
+  pg_prepare: 'הכנת הקובץ',
+  pg_auth: 'בדיקת חיבור ל-Google',
+  pg_folder: 'חיפוש תיקיית הגיבויים',
+  pg_upload: 'העלאה ל-Drive',
+  pg_verify: 'בדיקה: קריאה חזרה והשוואה',
+  pg_cleanup: 'ניקוי עותקים ישנים',
+  pgWaiting: 'ממתין לתשובה… {n} שנ׳',
+  pgSlow: 'זה לוקח יותר מהרגיל. אפשר להמשיך לחכות או לבטל.',
+  pgCancel: 'ביטול הגיבוי',
+  pgSec: '{n} שנ׳',
+  pgDone: 'הושלם ב-{n} שנ׳',
+  pgFailedAt: 'נעצר בשלב: {step}',
+  pgTimes: 'זמנים לפי שלב',
+  resDriveOk: 'הגיבוי ל-Drive הצליח ונבדק',
+  resDriveFail: 'הגיבוי ל-Drive לא הצליח',
+  resPhoneOk: 'הקובץ נשלח להורדה בטלפון',
+  resNothing: 'עוד לא נעשה גיבוי ידני בפתיחה הזו',
+  loadingList: 'טוען את רשימת הגיבויים… {n} שנ׳',
+  loadingFile: 'מוריד את הגיבוי… {n} שנ׳',
+  loadingGoogle: 'עובר ל-Google…',
+
+  // recovery help
+  rcTitle: 'אם משהו נשבר',
+  rcOpen: 'איך משחזרים',
+  rcSheetTitle: 'אם משהו נשבר: איך משחזרים',
+  rcIntro: 'הנתונים שלך מגובים בקבצים רגילים ב-Google Drive, בתיקייה "Shifts Backups". הקבצים לא תלויים באפליקציה הזו.',
+  rcS1Title: 'טלפון חדש או אפליקציה ריקה',
+  rcS1: 'פתח את האפליקציה בכתובת {url}, לחץ על "שחזור מ-Drive", התחבר לאותו חשבון Google ובחר את הגיבוי האחרון.',
+  rcS2Title: 'ההתחברות ל-Google לא עובדת',
+  rcS2: 'היכנס ל-drive.google.com בדפדפן, פתח את התיקייה "Shifts Backups" והורד את הקובץ האחרון (שם הקובץ מתחיל ב-shifts-backup). באפליקציה לחץ על "שחזור מקובץ" ובחר אותו.',
+  rcS3Title: 'האפליקציה לא נפתחת (האתר לא זמין)',
+  rcS3: 'הנתונים בגיבוי שלמים. צריך להעלות את קבצי האפליקציה מחדש (הארכיון shifts-app.zip ששמרת ב-Drive ובמחשב) לאתר חדש, או לבקש עזרה מ-Claude. אחר כך משחזרים כרגיל.',
+  rcS4Title: 'לפני כל שחזור',
+  rcS4: 'האפליקציה שומרת עותק ביטחון של הנתונים הנוכחיים. אפשר למצוא אותו תחת שחזור ← גיבויי ביטחון.',
 
   // strip
   stripDrive: 'Drive',
@@ -334,6 +396,8 @@ export const T = {
   e_too_new: 'הגיבוי נוצר בגרסה חדשה יותר',
   e_count_mismatch: 'הקובץ פגום (מספר הרשומות לא תואם)',
   e_generic: 'שגיאה ({code})',
+  e_timeout: 'Google לא ענה בזמן. נסה שוב',
+  e_cancelled: 'הגיבוי בוטל',
   e_http_403: 'אין הרשאה ב-Drive (403)',
   e_http_404: 'לא נמצא (404)',
 };
@@ -364,6 +428,14 @@ export function weekdayShort(dateStr) {
 // '2026-10-09' -> '09/10'
 export function fmtDM(dateStr) {
   return `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}`;
+}
+// '2026-10-09' -> '09.10.26' (short, for the date chips)
+export function fmtDMYshort(dateStr) {
+  return `${dateStr.slice(8, 10)}.${dateStr.slice(5, 7)}.${dateStr.slice(2, 4)}`;
+}
+// '2026-10-09' -> 'ו׳' (the weekday letter)
+export function weekdayLetter(dateStr) {
+  return WEEKDAYS[dowOf(dateStr)].replace('יום ', '');
 }
 // '2026-10-09' -> '09.10.2026'
 export function fmtDMY(dateStr) {

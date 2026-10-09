@@ -5,9 +5,20 @@ import { ctx, job, commit } from './ctx.js';
 import { newId } from './store.js';
 import { effective } from './settings.js';
 import { parseLocalDT, addDays, daysBetween, fmtDate, fmtHM, fmtMoney, previewEntries } from './calc.js';
-import { T, f } from './strings.js';
+import { T, f, fmtDMYshort } from './strings.js';
+import { dateChip, timeChip } from './ui-datetime.js';
 
 const pad = (n) => String(n).padStart(2, '0');
+
+// protection against typing errors (a shift that lasts a year, a date in the wrong year)
+const WARN_SHIFT_MIN = 16 * 60; // longer: ask "is this right?"
+const MAX_SHIFT_MIN = 24 * 60; // longer: not saved at all
+const PREVIEW_MAX_MIN = 7 * 24 * 60; // the preview is not calculated for longer shifts
+const WARN_RANGE_DAYS = 31; // a range of days off / sick / holiday longer than this: ask
+const MAX_RANGE_DAYS = 120; // longer: not saved
+const ODD_AHEAD_SHIFT_DAYS = 7; // a shift starting more than this far in the future: ask
+const ODD_BACK_DAYS = 400; // a date further back than this: ask
+const ODD_RANGE_DAYS = 366; // days off / sick / holiday further away than this (either way): ask
 
 function nowLocal() {
   const d = new Date();
@@ -92,7 +103,7 @@ export function openEntrySheet({ entry = null } = {}) {
     if (editing) return st.from ? [st.from] : [];
     if (!st.from || !st.to) return [];
     const n = daysBetween(st.from, st.to);
-    if (n < 0 || n > 120) return [];
+    if (n < 0 || n > MAX_RANGE_DAYS) return [];
     const out = [];
     for (let i = 0; i <= n; i++) out.push(addDays(st.from, i));
     return out;
@@ -121,7 +132,10 @@ export function openEntrySheet({ entry = null } = {}) {
       const d = shiftDraft();
       let net = 0;
       let total = 0;
-      if (parseLocalDT(d.start) && parseLocalDT(d.end) && d.end > d.start) {
+      const ps = parseLocalDT(d.start);
+      const pe = parseLocalDT(d.end);
+      // (a typing error like a wrong year would make the calculation slow, and it cannot be saved anyway)
+      if (ps && pe && d.end > d.start && (pe - ps) / 60000 <= PREVIEW_MAX_MIN) {
         const r = previewEntries(j, ctx.db.entries, [d])[0];
         if (r) {
           net = r.netMin;
@@ -145,64 +159,134 @@ export function openEntrySheet({ entry = null } = {}) {
     }
   }
 
-  // ----- inputs -----
-  let endInput;
+  // ----- date and time fields -----
+  const dOf = (x) => x.slice(0, 10);
+  const tOf = (x) => x.slice(11, 16);
+  // The exit follows the entry (the same day, or the next day when the exit time is earlier)
+  // until the user picks the exit date himself. An existing entry keeps its own dates.
+  let endAuto = !editing;
+  let toAuto = !editing;
+  let chips = null;
+  let durEl = null;
 
-  function fixEndAfterStartChange() {
-    if (!st.start || !st.end) return;
-    if (st.end < st.start) {
-      const endTime = st.end.slice(11, 16);
-      let cand = `${st.start.slice(0, 10)}T${endTime}`;
-      if (cand < st.start) cand = `${addDays(st.start.slice(0, 10), 1)}T${endTime}`;
-      st.end = cand;
-      if (endInput) endInput.value = st.end;
+  function autoEnd() {
+    let cand = `${dOf(st.start)}T${tOf(st.end)}`;
+    if (cand < st.start) cand = `${addDays(dOf(st.start), 1)}T${tOf(st.end)}`;
+    st.end = cand;
+  }
+  function onStartDate(d) {
+    const old = dOf(st.start);
+    st.start = `${d}T${tOf(st.start)}`;
+    if (endAuto) autoEnd();
+    else {
+      // the exit date moves by the same number of days
+      st.end = `${addDays(dOf(st.end), daysBetween(old, d))}T${tOf(st.end)}`;
+      if (st.end < st.start) autoEnd();
+    }
+    syncShiftChips();
+  }
+  function onStartTime(t) {
+    st.start = `${dOf(st.start)}T${t}`;
+    if (endAuto || st.end < st.start) autoEnd();
+    syncShiftChips();
+  }
+  function onEndDate(d) {
+    endAuto = false;
+    st.end = `${d}T${tOf(st.end)}`;
+    syncShiftChips();
+  }
+  function onEndTime(t) {
+    st.end = `${dOf(st.end)}T${t}`;
+    if (endAuto) autoEnd();
+    syncShiftChips();
+  }
+  function onFrom(d) {
+    const old = st.from;
+    st.from = d;
+    if (editing || toAuto || !st.to) st.to = d;
+    else {
+      st.to = addDays(st.to, daysBetween(old, d));
+      if (st.to < st.from) st.to = st.from;
+    }
+    syncDayChips();
+  }
+  function onTo(d) {
+    toAuto = false;
+    st.to = d;
+    syncDayChips();
+  }
+
+  // the line under the date fields: how long, and a warning when it is not normal
+  function updateDur() {
+    if (!durEl) return;
+    durEl.className = 'dur-line';
+    durEl.textContent = '';
+    const say = (cls, text) => {
+      if (cls) durEl.classList.add(cls);
+      durEl.textContent = text;
+    };
+    if (type === 'shift') {
+      const s = parseLocalDT(st.start);
+      const e = parseLocalDT(st.end);
+      if (!s || !e) return;
+      const min = Math.round((e - s) / 60000);
+      const unchanged = !!entry && entry.start === st.start && entry.end === st.end;
+      if (min < 0) say('bad', T.durBad);
+      else if (min === 0) return;
+      else if (unchanged) say('', f(T.durLine, { d: fmtHM(min) }));
+      else if (min > MAX_SHIFT_MIN) say('bad', `${fmtHM(min)} · ${T.durTooLong}`);
+      else if (min > WARN_SHIFT_MIN) say('warn', f(T.durLong, { d: fmtHM(min) }));
+      else say('', f(T.durLine, { d: fmtHM(min) }));
+    } else if (!editing && st.from && st.to) {
+      const n = daysBetween(st.from, st.to);
+      if (n < 0) say('bad', T.errRange);
+      else if (n > MAX_RANGE_DAYS) say('bad', T.errRangeLong);
+      else if (n + 1 > WARN_RANGE_DAYS) say('warn', f(T.confirmLongRange, { n: n + 1 }));
     }
   }
-  function fixEndAfterEndChange() {
-    if (!st.start || !st.end) return;
-    if (st.end < st.start && st.end.slice(0, 10) === st.start.slice(0, 10)) {
-      st.end = `${addDays(st.end.slice(0, 10), 1)}T${st.end.slice(11, 16)}`;
-      if (endInput) endInput.value = st.end;
+
+  function syncShiftChips() {
+    if (chips) {
+      chips.sd.set(dOf(st.start));
+      chips.stt.set(tOf(st.start));
+      chips.ed.set(dOf(st.end));
+      chips.ett.set(tOf(st.end));
     }
+    updateDur();
+    updatePreview();
+  }
+  function syncDayChips() {
+    if (chips) {
+      chips.from.set(st.from);
+      if (chips.to) chips.to.set(st.to);
+    }
+    updateDur();
+    updatePreview();
   }
 
-  function dtRow(labelText, iconName, key, onChange) {
-    const input = h('input', {
-      class: 'dt-input',
-      type: 'datetime-local',
-      value: st[key],
-      'aria-label': labelText,
-      onchange: (ev) => {
-        st[key] = ev.target.value;
-        onChange();
-        updatePreview();
-      },
-      oninput: (ev) => {
-        st[key] = ev.target.value;
-        updatePreview();
-      },
-    });
-    if (key === 'end') endInput = input;
-    return h('label', { class: 'dt-row ' + key }, h('span', { class: 'dt-label' }, icon(iconName, 26), h('span', null, labelText)), input);
+  function shiftRows() {
+    chips = {
+      sd: dateChip({ value: dOf(st.start), onChange: onStartDate, label: T.fIn }),
+      stt: timeChip({ value: tOf(st.start), onChange: onStartTime, label: T.fIn }),
+      ed: dateChip({ value: dOf(st.end), onChange: onEndDate, label: T.fOut }),
+      ett: timeChip({ value: tOf(st.end), onChange: onEndTime, label: T.fOut }),
+    };
+    durEl = h('div', { class: 'dur-line' });
+    updateDur();
+    const row = (cls, labelText, iconName, a, b) =>
+      h('div', { class: 'dt-row compact ' + cls }, h('span', { class: 'dt-label' }, icon(iconName, 24), h('span', null, labelText)), h('div', { class: 'chips' }, a.el, b.el));
+    return [row('start', T.fIn, 'download', chips.sd, chips.stt), row('end', T.fOut, 'upload', chips.ed, chips.ett), durEl];
   }
 
-  function dateRow(labelText, key, onChange) {
-    return h(
-      'label',
-      { class: 'dt-row date' },
-      h('span', { class: 'dt-label' }, icon('clock', 22), h('span', null, labelText)),
-      h('input', {
-        class: 'dt-input',
-        type: 'date',
-        value: st[key],
-        'aria-label': labelText,
-        onchange: (ev) => {
-          st[key] = ev.target.value;
-          if (onChange) onChange();
-          updatePreview();
-        },
-      }),
-    );
+  function dayRows() {
+    chips = {
+      from: dateChip({ value: st.from, onChange: onFrom, label: editing ? T.fDate : T.fFrom }),
+      to: editing ? null : dateChip({ value: st.to, onChange: onTo, label: T.fTo }),
+    };
+    durEl = h('div', { class: 'dur-line' });
+    updateDur();
+    const row = (labelText, chip) => h('div', { class: 'dt-row compact date' }, h('span', { class: 'dt-label' }, icon('clock', 22), h('span', null, labelText)), h('div', { class: 'chips' }, chip.el));
+    return [row(editing ? T.fDate : T.fFrom, chips.from), chips.to ? row(T.fTo, chips.to) : null, durEl];
   }
 
   let fieldSeq = 0;
@@ -261,8 +345,7 @@ export function openEntrySheet({ entry = null } = {}) {
 
   function shiftForm() {
     return [
-      dtRow(T.fIn, 'download', 'start', fixEndAfterStartChange),
-      dtRow(T.fOut, 'upload', 'end', fixEndAfterEndChange),
+      ...shiftRows(),
       tariffBlock(),
       h('div', { class: 'two' }, field(T.fTip, numberInput('tip')), field(T.fExpenses, numberInput('expenses'))),
       noteField(),
@@ -283,22 +366,7 @@ export function openEntrySheet({ entry = null } = {}) {
 
   function dayForm() {
     const S = effective(j, (st.from || todayStr()).slice(0, 7));
-    const fromRow = editing
-      ? dateRow(T.fDate, 'from', () => {
-          st.to = st.from;
-        })
-      : dateRow(T.fFrom, 'from', () => {
-          if (!st.to || st.to < st.from) {
-            st.to = st.from;
-            draw();
-          }
-        });
-    return [
-      fromRow,
-      editing ? null : dateRow(T.fTo, 'to'),
-      field(T.fDayHours, numberInput('hours', f(T.fDayHoursHint, { n: S.dayHours })), null),
-      noteField(),
-    ];
+    return [...dayRows(), field(T.fDayHours, numberInput('hours', f(T.fDayHoursHint, { n: S.dayHours })), null), noteField()];
   }
 
   function draw() {
@@ -343,9 +411,21 @@ export function openEntrySheet({ entry = null } = {}) {
         if (!Number.isFinite(v) || v < 0) return toast(T.invalidNumber, { kind: 'err' });
         tariff = { mode: st.tMode, value: v };
       }
-      if ((e - s) / 3600000 > 24) {
-        const ok = await confirmDialog({ title: T.errLong, okText: T.keep, cancelText: T.cancel });
+      const durMin = (e - s) / 60000;
+      // an entry that is already stored and whose times were not touched is not judged again
+      const timesChanged = !entry || entry.start !== st.start || entry.end !== st.end;
+      if (timesChanged && durMin > MAX_SHIFT_MIN) return toast(T.errTooLong, { kind: 'err' });
+      if (timesChanged && durMin > WARN_SHIFT_MIN) {
+        const ok = await confirmDialog({ title: f(T.confirmLongShift, { d: fmtHM(durMin) }), okText: T.keep, cancelText: T.cancel });
         if (!ok) return;
+      }
+      // a date that looks like a typing error (only when the date is new or was changed)
+      if (!entry || entry.start !== st.start) {
+        const diff = daysBetween(todayStr(), dOf(st.start));
+        if (diff > ODD_AHEAD_SHIFT_DAYS || diff < -ODD_BACK_DAYS) {
+          const ok = await confirmDialog({ title: f(T.confirmOddDate, { date: fmtDMYshort(dOf(st.start)) }), okText: T.keep, cancelText: T.cancel });
+          if (!ok) return;
+        }
       }
       if (entry) {
         Object.assign(entry, { start: st.start, end: st.end, tariff, tip, expenses: exp, note: st.note.trim(), updatedAt: now });
@@ -364,7 +444,18 @@ export function openEntrySheet({ entry = null } = {}) {
     if (!editing) {
       const n = daysBetween(st.from, st.to);
       if (n < 0) return toast(T.errRange, { kind: 'err' });
-      if (n > 120) return toast(T.errRangeLong, { kind: 'err' });
+      if (n > MAX_RANGE_DAYS) return toast(T.errRangeLong, { kind: 'err' });
+      if (n + 1 > WARN_RANGE_DAYS) {
+        const ok = await confirmDialog({ title: f(T.confirmLongRange, { n: n + 1 }), okText: T.keep, cancelText: T.cancel });
+        if (!ok) return;
+      }
+    }
+    if (!entry || entry.date !== st.from) {
+      const diff = daysBetween(todayStr(), st.from);
+      if (Math.abs(diff) > ODD_RANGE_DAYS) {
+        const ok = await confirmDialog({ title: f(T.confirmOddDate, { date: fmtDMYshort(st.from) }), okText: T.keep, cancelText: T.cancel });
+        if (!ok) return;
+      }
     }
     let hours;
     if (String(st.hours).trim() !== '') {

@@ -2,13 +2,14 @@
 // they are uploaded), the saved copy is used only when the network is not available.
 // Google and Drive requests are never touched here.
 
-const CACHE = 'shiftlog-v1';
+const CACHE = 'shiftlog-v2';
 const FILES = [
   './',
   'index.html',
   'style.css',
   'app.js',
   'config.js',
+  'version.js',
   'calc.js',
   'settings.js',
   'store.js',
@@ -21,6 +22,7 @@ const FILES = [
   'ui-common.js',
   'ui-shifts.js',
   'ui-entry.js',
+  'ui-datetime.js',
   'ui-work.js',
   'ui-backup.js',
   'manifest.webmanifest',

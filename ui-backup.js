@@ -1,16 +1,39 @@
 // ui-backup.js: the "backup" tab, restore flows and the first-run screen.
 
-import { h, icon, openSheet, confirmDialog, toast } from './dom.js';
+import { h, icon, openSheet, confirmDialog, toast, sheetsSettled } from './dom.js';
 import { ctx, commit } from './ctx.js';
 import * as B from './backup.js';
 import * as drive from './drive.js';
-import { CONFIG } from './config.js';
+import { APP_VERSION } from './version.js';
 import { isEmptyDb, kvSet } from './store.js';
-import { runBackupNow, signInGoogle, refreshLocalPerm, requestAutoBackup } from './autobackup.js';
+import { runBackupNow, runPhoneBackup, cancelRun, signInGoogle } from './autobackup.js';
 import { describeTarget, dot } from './ui-common.js';
 import { T, f, lri, errText, fmtStamp, fmtDMY } from './strings.js';
 
 const errCode = (e) => (e && e.code) || 'error';
+
+// ---------- live timers: "how long has this been going on" ----------
+// An element with data-since counts seconds by itself, so a stuck step is visible at once.
+// An element with data-show-at stays hidden until that moment (the "this takes long" hint).
+let tickerOn = false;
+function startTicker() {
+  if (tickerOn) return;
+  tickerOn = true;
+  setInterval(() => {
+    const now = Date.now();
+    for (const el of document.querySelectorAll('[data-since]')) {
+      el.textContent = f(el.dataset.tpl, { n: Math.max(0, Math.round((now - Number(el.dataset.since)) / 1000)) });
+    }
+    for (const el of document.querySelectorAll('[data-show-at]')) {
+      el.hidden = now < Number(el.dataset.showAt);
+    }
+  }, 500);
+}
+export function liveSpan(tpl, since) {
+  startTicker();
+  return h('span', { dir: 'auto', dataset: { since: String(since), tpl } }, f(tpl, { n: Math.max(0, Math.round((Date.now() - since) / 1000)) }));
+}
+const secs = (ms) => f(T.pgSec, { n: (ms / 1000).toFixed(1) });
 
 // ---------- restore ----------
 
@@ -75,7 +98,7 @@ export function startRestoreFromDrive() {
   }
   drive.expectIntent('restore');
   const listP = B.listDriveBackups({ interactive: true });
-  const loading = h('div', { class: 'empty' }, T.loading);
+  const loading = h('div', { class: 'empty' }, liveSpan(T.loadingList, Date.now()));
   const body = h('div', { class: 'sheet-col' }, header(T.bRestorePick, () => sheet.close()), h('div', { class: 'sheet-scroll' }, loading));
   const sheet = openSheet(body, { full: true });
 
@@ -89,13 +112,16 @@ export function startRestoreFromDrive() {
               type: 'button',
               onclick: async () => {
                 try {
+                  sheet.setContent(h('div', { class: 'sheet-col' }, header(T.bRestorePick, () => sheet.close()), h('div', { class: 'sheet-scroll' }, h('div', { class: 'empty' }, liveSpan(T.loadingFile, Date.now())))));
                   const text = await B.fetchDriveBackup(it.id, { interactive: true });
                   const parsed = parseOrToast(text);
-                  if (!parsed) return;
+                  if (!parsed) return show(list);
                   const done = await confirmRestore(parsed, fmtStamp(it.date.toISOString()));
                   if (done) sheet.close();
+                  else show(list);
                 } catch (e) {
                   toast(errText(errCode(e)), { kind: 'err' });
+                  show(list);
                 }
               },
             },
@@ -206,38 +232,80 @@ export function firstRunScreen() {
 
 // ---------- the tab ----------
 
-function resultLines() {
-  const r = ctx.lastResult;
-  if (!r || !r.manual) return null;
-  const lines = [];
-  const stamp = fmtStamp(r.at);
-  if (r.drive) {
-    lines.push(
-      r.drive.ok
-        ? h('div', { class: 'res ok' }, icon('check', 18), h('b', null, T.bDrive), h('span', { dir: 'ltr' }, stamp))
-        : h('div', { class: 'res bad' }, icon('x', 18), h('b', null, T.bDrive), h('span', null, errText(r.drive.code))),
-    );
-  }
-  if (r.local) {
-    if (r.local.skipped) lines.push(h('div', { class: 'res off' }, icon('minus', 18), h('span', null, T.bPhoneSkipped)));
-    else
-      lines.push(
-        r.local.ok
-          ? h('div', { class: 'res ok' }, icon('check', 18), h('b', null, T.bPhone), h('span', { dir: 'ltr' }, stamp))
-          : h('div', { class: 'res bad' }, icon('x', 18), h('b', null, T.bPhone), h('span', null, errText(r.local.code))),
-      );
-  }
-  return h('div', { class: 'card result' }, h('div', { class: 'card-title' }, T.bResult), lines);
+// the list "step - time" of a finished or stopped backup
+function stepTimes(steps) {
+  if (!steps) return null;
+  const done = steps.steps.filter((x) => x.ms != null);
+  if (!done.length) return null;
+  return h(
+    'div',
+    { class: 'step-times' },
+    h('div', { class: 'muted' }, T.pgTimes),
+    done.map((x, i) => h('div', { class: 'st-row' + (steps.failedAt === steps.steps.indexOf(x) ? ' bad' : '') }, h('span', null, T['pg_' + x.key]), h('b', { dir: 'ltr' }, secs(x.ms)))),
+  );
 }
 
-function targetCard(kind) {
+function driveResult() {
+  const r = ctx.lastResult;
+  if (!r || r.kind !== 'drive' || !r.manual) return null;
+  if (r.ok) {
+    return h(
+      'div',
+      { class: 'result ok' },
+      h('div', { class: 'res ok' }, icon('check', 18), h('b', null, T.resDriveOk), h('span', { dir: 'ltr' }, fmtStamp(r.at))),
+      h('div', { class: 'muted' }, T.bVerifiedDrive),
+      h('div', { class: 'muted' }, f(T.pgDone, { n: (r.steps.totalMs / 1000).toFixed(1) })),
+      stepTimes(r.steps),
+    );
+  }
+  const failed = r.steps && r.steps.failedAt >= 0 ? r.steps.steps[r.steps.failedAt] : null;
+  return h(
+    'div',
+    { class: 'result bad' },
+    h('div', { class: 'res bad' }, icon('x', 18), h('b', null, T.resDriveFail), h('span', null, errText(r.code))),
+    failed ? h('div', { class: 'muted' }, f(T.pgFailedAt, { step: T['pg_' + failed.key] })) : null,
+    stepTimes(r.steps),
+  );
+}
+
+// the running backup: a bar with one segment per step, the list of steps and live seconds
+function progressBlock() {
+  const t = ctx.progress;
+  if (!t) return null;
+  const cur = t.index;
+  return h(
+    'div',
+    { class: 'progress', role: 'status' },
+    h('div', { class: 'pg-head' }, h('b', null, f(T.pgStep, { n: Math.max(1, cur + 1), m: t.keys.length })), liveSpan(T.pgSec, t.startedAt)),
+    h('div', { class: 'pbar', 'aria-hidden': 'true' }, t.keys.map((k, i) => h('i', { class: i < cur ? 'done' : i === cur ? 'run' : '' }))),
+    h(
+      'div',
+      { class: 'pg-list' },
+      t.keys.map((k, i) => {
+        const state = i < cur ? 'done' : i === cur ? 'run' : 'wait';
+        return h(
+          'div',
+          { class: 'pg-row ' + state },
+          h('span', { class: 'pg-ic' }, state === 'done' ? icon('check', 18) : state === 'run' ? icon('refresh', 18, 'spin') : h('span', { class: 'pg-dot' })),
+          h('span', { class: 'pg-label' }, T['pg_' + k]),
+          h('span', { class: 'pg-time', dir: 'ltr' }, state === 'done' ? secs(t.steps[i].ms) : state === 'run' ? liveSpan(T.pgSec, t.stepStartedAt) : ''),
+        );
+      }),
+    ),
+    h('div', { class: 'pg-slow', hidden: true, dataset: { showAt: String(t.stepStartedAt + 15000) } }, T.pgSlow),
+    h('button', { class: 'btn small', type: 'button', onclick: () => cancelRun() }, T.pgCancel),
+  );
+}
+
+function targetCard(kind, extra) {
   const d = describeTarget(kind);
-  const big = d.lastOk ? fmtStamp(d.lastOk.at) : d.enabled ? T.bNone : '—';
+  const big = d.lastOk ? fmtStamp(d.lastOk.at) : d.enabled ? (kind === 'local' ? T.bPhoneNone : T.bNone) : '—';
   let status;
-  if (d.code === 'ok') status = h('div', { class: 'status-line ok' }, icon('check', 18), T.bOk);
+  if (kind === 'local') {
+    status = d.lastOk ? h('div', { class: 'status-line muted' }, icon('info', 18), T.bPhoneUnverified, d.sub ? h('div', { class: 'status-sub' }, d.sub) : null) : null;
+  } else if (d.code === 'ok') status = h('div', { class: 'status-line ok' }, icon('check', 18), T.bOk);
   else if (d.code === 'guard') status = h('div', { class: 'status-line warn' }, icon('alert', 18), T.bGuardShort);
   else if (d.code === 'not_configured') status = h('div', { class: 'status-line bad' }, notConfText());
-  else if (d.code === 'no_folder') status = h('div', { class: 'status-line muted' }, T.bFolderNone);
   else if (d.code === 'failed' || d.code === 'none') status = h('div', { class: 'status-line bad' }, icon('x', 18), d.text, d.sub ? h('div', { class: 'status-sub' }, d.sub) : null);
   else status = h('div', { class: 'status-line ' + d.level }, icon('alert', 18), d.sub);
   return h(
@@ -247,7 +315,54 @@ function targetCard(kind) {
     h('div', { class: 'target-date', dir: 'ltr' }, big),
     status,
     d.lastOk ? h('div', { class: 'file-line', dir: 'ltr' }, `${d.lastOk.name}`) : null,
-    d.lastOk ? h('div', { class: 'file-line' }, f(T.bEntries, { n: d.lastOk.entries }), d.lastOk.account && kind === 'drive' ? ` · ${d.lastOk.account}` : '', d.lastOk.folder && kind === 'local' ? ` · ${d.lastOk.folder}` : '') : null,
+    d.lastOk ? h('div', { class: 'file-line' }, f(T.bEntries, { n: d.lastOk.entries }), d.lastOk.account && kind === 'drive' ? ` · ${d.lastOk.account}` : '') : null,
+    extra,
+  );
+}
+
+async function onDriveBackup() {
+  if (isEmptyDb(ctx.db)) return toast(T.bEmptyNow, { kind: 'warn' });
+  const ok = await confirmDialog({ title: T.bConfirmDriveTitle, text: T.bConfirmDriveText, okText: T.bConfirmDriveYes, cancelText: T.cancel });
+  if (!ok) return;
+  // the confirm sheet steps back in the history; a trip to Google must not start in the middle of that
+  await sheetsSettled();
+  const r = await runBackupNow({ interactive: true, manual: true });
+  if (!r || (r.drive && r.drive.code === 'redirecting')) return;
+  const good = !!(r.drive && r.drive.ok);
+  toast(good ? T.resDriveOk : `${T.resDriveFail}: ${errText(r.drive.code)}`, { kind: good ? 'ok' : 'err', ms: 5000 });
+}
+
+async function onPhoneBackup() {
+  if (isEmptyDb(ctx.db)) return toast(T.bEmptyNow, { kind: 'warn' });
+  const ok = await confirmDialog({ title: T.bConfirmPhoneTitle, text: T.bConfirmPhoneText, okText: T.bConfirmPhoneYes, cancelText: T.cancel });
+  if (!ok) return;
+  await sheetsSettled();
+  await runPhoneBackup();
+}
+
+function driveCard() {
+  const running = !!ctx.progress;
+  const btn = h(
+    'button',
+    { class: 'btn primary big', type: 'button', disabled: ctx.busy, onclick: () => onDriveBackup() },
+    icon(ctx.busy ? 'refresh' : 'cloud', 24, ctx.busy ? 'spin' : ''),
+    ctx.busy ? T.bBusy : T.bNowDrive,
+  );
+  return targetCard('drive', h('div', { class: 'card-extra' }, running ? progressBlock() : [btn, driveResult()]));
+}
+
+function phoneCard() {
+  const r = ctx.lastPhone;
+  const res = r && r.ok ? h('div', { class: 'res ok' }, icon('check', 18), h('b', null, T.resPhoneOk), h('span', { dir: 'ltr' }, fmtStamp(r.at))) : r && !r.ok ? h('div', { class: 'res bad' }, icon('x', 18), h('span', null, errText(r.code))) : null;
+  return targetCard(
+    'local',
+    h(
+      'div',
+      { class: 'card-extra' },
+      h('button', { class: 'btn wide', type: 'button', onclick: () => onPhoneBackup() }, icon('download', 22), T.bNowPhone),
+      res,
+      h('div', { class: 'hint' }, T.bPhoneNote),
+    ),
   );
 }
 
@@ -302,100 +417,6 @@ function googleCard() {
   );
 }
 
-function folderCard() {
-  const supported = B.localFolderSupported();
-  const dir = ctx.localDir;
-  const needPerm = dir && ctx.localPerm && ctx.localPerm !== 'granted';
-  const pick = async () => {
-    try {
-      const handle = await B.pickLocalFolder();
-      ctx.localDir = handle;
-      await refreshLocalPerm();
-      toast(f(T.bFolderPicked, { name: handle.name }));
-      ctx.render();
-      requestAutoBackup({ fromTap: false });
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;
-      toast(`${T.bRestoreFail}: ${e && e.message ? e.message : e}`, { kind: 'err', ms: 6000 });
-    }
-  };
-  return h(
-    'div',
-    { class: 'card' },
-    h('div', { class: 'card-title' }, icon('folder', 20), T.bFolder),
-    supported
-      ? h(
-          'div',
-          null,
-          h('div', { class: 'kv' }, dir ? h('b', { dir: 'ltr' }, dir.name) : h('span', { class: 'muted' }, T.bFolderNone)),
-          needPerm ? h('div', { class: 'status-line warn' }, icon('alert', 18), T.bFolderPermission) : null,
-          h(
-            'div',
-            { class: 'btn-row' },
-            needPerm
-              ? h(
-                  'button',
-                  {
-                    class: 'btn primary',
-                    type: 'button',
-                    onclick: () => {
-                      // straight from the tap: ask the browser for access again
-                      ctx.localDir
-                        .requestPermission({ mode: 'readwrite' })
-                        .then(async (p) => {
-                          ctx.localPerm = p;
-                          if (p === 'granted') {
-                            toast(T.bFolderApproved);
-                            requestAutoBackup({ fromTap: false });
-                          }
-                          ctx.render();
-                        })
-                        .catch((e) => toast(String(e && e.message ? e.message : e), { kind: 'err' }));
-                    },
-                  },
-                  T.bFolderApprove,
-                )
-              : null,
-            h('button', { class: 'btn' + (dir || needPerm ? '' : ' primary'), type: 'button', onclick: pick }, dir ? T.bFolderChange : T.bFolderPick),
-            dir
-              ? h(
-                  'button',
-                  {
-                    class: 'btn ghost',
-                    type: 'button',
-                    onclick: async () => {
-                      await B.forgetLocalFolder();
-                      ctx.localDir = null;
-                      ctx.localPerm = null;
-                      ctx.render();
-                    },
-                  },
-                  T.bFolderRemove,
-                )
-              : null,
-          ),
-          h('div', { class: 'hint' }, T.bFolderHint),
-        )
-      : h('p', { class: 'muted' }, T.bFolderUnsupported),
-    h('div', { class: 'divider' }),
-    h(
-      'button',
-      {
-        class: 'btn wide',
-        type: 'button',
-        onclick: () => {
-          if (isEmptyDb(ctx.db)) return toast(T.bEmptyNow, { kind: 'warn' });
-          B.downloadBackup(B.buildBackup(ctx.db));
-          toast(T.bDownloaded);
-        },
-      },
-      icon('download', 20),
-      T.bDownload,
-    ),
-    h('div', { class: 'hint' }, T.bDownloadHint),
-  );
-}
-
 function restoreCard() {
   return h(
     'div',
@@ -411,9 +432,43 @@ function restoreCard() {
   );
 }
 
+// "If something breaks": what to do, written for a day when nobody is around to help
+function openRecoveryHelp() {
+  let sheet;
+  const sec = (title, text) => h('div', { class: 'help-sec' }, h('b', null, title), h('p', null, text));
+  const body = h(
+    'div',
+    { class: 'sheet-col' },
+    header(T.rcSheetTitle, () => sheet.close()),
+    h(
+      'div',
+      { class: 'sheet-scroll' },
+      h(
+        'div',
+        { class: 'card help' },
+        h('p', null, T.rcIntro),
+        sec(T.rcS1Title, f(T.rcS1, { url: lri(drive.redirectUri()) })),
+        sec(T.rcS2Title, T.rcS2),
+        sec(T.rcS3Title, T.rcS3),
+        sec(T.rcS4Title, T.rcS4),
+      ),
+    ),
+  );
+  sheet = openSheet(body, { full: true });
+}
+
+function helpCard() {
+  return h(
+    'div',
+    { class: 'card' },
+    h('div', { class: 'card-title' }, icon('shield', 20), T.rcTitle),
+    h('button', { class: 'btn', type: 'button', onclick: () => openRecoveryHelp() }, icon('info', 20), T.rcOpen),
+  );
+}
+
 function guardNote() {
-  const g = ['drive', 'local'].map((k) => targetState2(k)).find((s) => s && s.guard);
-  if (!g) return null;
+  const g = describeTarget('drive');
+  if (!g || !g.guard) return null;
   return h(
     'div',
     { class: 'card warn-card' },
@@ -436,34 +491,9 @@ function guardNote() {
       : null,
   );
 }
-function targetState2(kind) {
-  return describeTarget(kind);
-}
 
 export function backupScreen() {
   const head = h('div', { class: 'screen-head' }, h('div', { class: 'screen-title' }, T.backupTitle));
-  const btn = h(
-    'button',
-    {
-      class: 'btn primary big',
-      type: 'button',
-      disabled: ctx.busy,
-      onclick: () => {
-        // straight from the tap: sign-in to Google may have to start right here
-        runBackupNow({ interactive: true, manual: true }).then((r) => {
-          if (!r || (r.drive && r.drive.code === 'redirecting')) return;
-          const dOk = r.drive && r.drive.ok;
-          const lOk = r.local && (r.local.ok || r.local.skipped);
-          const parts = [];
-          if (r.drive) parts.push(dOk ? T.bDriveOk : T.bDriveFail);
-          if (r.local && !r.local.skipped) parts.push(r.local.ok ? T.bPhoneOk : T.bPhoneFail);
-          toast(parts.join(' · '), { kind: dOk && lOk ? 'ok' : 'err', ms: 5000 });
-        });
-      },
-    },
-    icon(ctx.busy ? 'refresh' : 'cloud', 24, ctx.busy ? 'spin' : ''),
-    ctx.busy ? T.bBusy : T.bNow,
-  );
   const storage = h(
     'div',
     { class: 'card' },
@@ -474,7 +504,7 @@ export function backupScreen() {
   const body = h(
     'div',
     { class: 'scroll' },
-    h('div', { class: 'stack' }, targetCard('drive'), targetCard('local'), btn, resultLines(), guardNote(), googleCard(), folderCard(), restoreCard(), storage, h('div', { class: 'version' }, f(T.bVersion, { v: CONFIG.APP_VERSION }))),
+    h('div', { class: 'stack' }, driveCard(), phoneCard(), guardNote(), googleCard(), restoreCard(), helpCard(), storage, h('div', { class: 'version' }, f(T.bVersion, { v: APP_VERSION }))),
     h('div', { class: 'spacer-bottom' }),
   );
   return [head, body];

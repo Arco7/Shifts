@@ -3,13 +3,13 @@
 import { h, icon, clear, initSheets } from './dom.js';
 import { ctx } from './ctx.js';
 import { loadDb, emptyDb, isEmptyDb, requestPersist, kvGet } from './store.js';
-import { validateDb, getLocalFolder } from './backup.js';
+import { validateDb } from './backup.js';
 import { fmtDate } from './calc.js';
-import { loadStatus, worstLevel, requestAutoBackup, startAutoChecks, refreshLocalPerm, handleRedirectResult } from './autobackup.js';
+import { loadStatus, worstLevel, requestAutoBackup, startAutoChecks, handleRedirectResult } from './autobackup.js';
 import { shiftsScreen } from './ui-shifts.js';
 import { workScreen } from './ui-work.js';
 import { backupScreen, firstRunScreen, startRestoreFromDrive } from './ui-backup.js';
-import { isConfigured, loadGis, consumeRedirectResult } from './drive.js';
+import { isConfigured, loadGis, consumeRedirectResult, signInMode } from './drive.js';
 import { T } from './strings.js';
 
 const TABS = [
@@ -121,12 +121,6 @@ async function boot() {
   } catch (e) {
     console.error(e);
   }
-  try {
-    ctx.localDir = await getLocalFolder();
-    await refreshLocalPerm();
-  } catch {
-    ctx.localDir = null;
-  }
   // came back from Google (redirect sign-in): take the token out of the address first
   let redirectResult = null;
   try {
@@ -146,12 +140,12 @@ async function boot() {
     ctx.persisted = p;
     render();
   });
-  // load the Google sign-in script early: the sign-in window must open straight from a tap
-  if (isConfigured()) loadGis().catch(() => {});
+  // popup sign-in only: load the Google script early (the window must open straight from a tap)
+  if (isConfigured() && signInMode() === 'popup') loadGis().catch(() => {});
   startAutoChecks();
   document.addEventListener('visibilitychange', () => {
     // another window (the Google sign-in tab) may have changed the status meanwhile
-    if (document.visibilityState === 'visible') Promise.all([refreshLocalPerm(), loadStatus()]).then(() => render());
+    if (document.visibilityState === 'visible') loadStatus().then(() => render());
   });
 
   if ('serviceWorker' in navigator) {

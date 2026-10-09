@@ -7,14 +7,15 @@ import { T, f } from './strings.js';
 export const ctx = {
   db: null,
   status: { drive: {}, local: {} },
-  localDir: null,
-  localPerm: null,
   tab: 'shifts',
   jobId: null,
   month: '',
   editMode: false,
   busy: false,
-  lastResult: null,
+  progress: null, // the tracker of the running Drive backup (see backup.js makeTracker)
+  progressManual: false, // the user pressed the button (show the progress even for the first steps)
+  lastResult: null, // result of the last Drive backup: {kind, ok, code, at, steps, ...}
+  lastPhone: null, // result of the last phone backup
   persisted: false,
   hadData: false,
   started: false,

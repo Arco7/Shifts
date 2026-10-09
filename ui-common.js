@@ -3,7 +3,7 @@
 import { h, icon } from './dom.js';
 import { targetState } from './autobackup.js';
 import { clientIdProblem } from './drive.js';
-import { T, f, fmtStamp, errText } from './strings.js';
+import { T, f, fmtStamp, errText, ago } from './strings.js';
 
 // one line about one backup target: {level, label, text, sub}
 export function describeTarget(kind) {
@@ -16,6 +16,11 @@ export function describeTarget(kind) {
   switch (s.code) {
     case 'ok':
       text = stamp;
+      // the phone copy is made by hand now and then: just say how long ago it was
+      if (kind === 'local') {
+        sub = ago(s.lastOk.at);
+        short = sub;
+      }
       break;
     case 'pending':
       text = stamp;
@@ -28,25 +33,17 @@ export function describeTarget(kind) {
       short = T.stripGuard;
       break;
     case 'failed':
-      text = (kind === 'drive' ? T.bFailed : T.bFailedPhone) + ' · ' + errText(s.lastFail.code);
+      text = T.bFailed + ' · ' + errText(s.lastFail.code);
       sub = `${T.bLastSuccess}: ${stamp}`;
       short = T.stripFailed;
       break;
     case 'none':
-      text = s.lastFail ? (kind === 'drive' ? T.bFailed : T.bFailedPhone) + ' · ' + errText(s.lastFail.code) : T.bNone;
+      text = kind === 'local' ? T.bPhoneNone : s.lastFail ? T.bFailed + ' · ' + errText(s.lastFail.code) : T.bNone;
       sub = s.lastFail ? T.bNoSuccessYet : '';
       short = s.lastFail ? T.stripFailed : '';
       break;
     case 'not_configured':
       text = clientIdProblem() === 'bad' ? T.bBadClientIdTitle : T.bNotConfiguredTitle;
-      break;
-    case 'permission':
-      text = stamp || T.bNone;
-      sub = T.bFolderPermission;
-      short = T.stripPermission;
-      break;
-    case 'no_folder':
-      text = T.bOff;
       break;
     default:
       text = '';
@@ -64,7 +61,7 @@ export function statusStrip(onTap) {
     const d = describeTarget(k);
     const label = k === 'drive' ? T.stripDrive : T.bPhone;
     // failed / none: the line says what is wrong; otherwise the date of the last backup
-    const main = d.code === 'failed' || d.code === 'none' || d.code === 'not_configured' || d.code === 'no_folder' ? d.text : d.lastOk ? fmtStamp(d.lastOk.at) : d.text;
+    const main = d.code === 'failed' || d.code === 'none' || d.code === 'not_configured' ? d.text : d.lastOk ? fmtStamp(d.lastOk.at) : d.text;
     return h(
       'div',
       { class: 'strip-row ' + d.level },

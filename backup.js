@@ -224,17 +224,98 @@ function sortedParsed(files) {
     .sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
 }
 
+// ---------- progress (what the screen shows while a backup runs) ----------
+
+// the steps of a Drive backup, in order
+export const DRIVE_STEPS = ['prepare', 'auth', 'folder', 'upload', 'verify', 'cleanup'];
+
+// A tracker remembers which step is running and how long every finished step took.
+export function makeTracker(keys, onChange) {
+  const t = {
+    keys,
+    startedAt: Date.now(),
+    index: -1,
+    stepStartedAt: 0,
+    steps: keys.map((key) => ({ key, ms: null })),
+    failedAt: -1,
+    done: false,
+    totalMs: null,
+  };
+  const notify = () => {
+    try {
+      if (onChange) onChange(t);
+    } catch {
+      /* the screen must never break a backup */
+    }
+  };
+  const closeCurrent = () => {
+    if (t.index >= 0 && t.steps[t.index].ms == null) t.steps[t.index].ms = Date.now() - t.stepStartedAt;
+  };
+  t.step = (key) => {
+    closeCurrent();
+    t.index = keys.indexOf(key);
+    t.stepStartedAt = Date.now();
+    notify();
+  };
+  t.fail = () => {
+    t.failedAt = t.index;
+  };
+  t.end = () => {
+    closeCurrent();
+    t.done = true;
+    t.totalMs = Date.now() - t.startedAt;
+    notify();
+  };
+  t.snapshot = () => ({
+    steps: t.steps.map((x) => ({ ...x })),
+    failedAt: t.failedAt,
+    totalMs: t.totalMs != null ? t.totalMs : Date.now() - t.startedAt,
+  });
+  return t;
+}
+
+let progressHook = null;
+export function onProgress(fn) {
+  progressHook = fn;
+}
+
+// ---------- Drive ----------
+
 // Call from a tap handler: the first statement starts sign-in synchronously when needed.
-export async function backupToDrive(built, { interactive = false } = {}) {
+// Steps: auth -> folder -> upload (and list the old copies at the same time) -> verify -> cleanup.
+export async function backupToDrive(built, { interactive = false, tracker = null, signal = null } = {}) {
+  const step = (k) => {
+    if (tracker) tracker.step(k);
+  };
+  // after "cancel" or the time limit no further request may start (a late answer must not write anything)
+  const alive = () => {
+    if (signal && signal.aborted) throw new BackupError('cancelled', 'cancelled');
+  };
+  step('auth');
   const tokenP = drive.getToken({ interactive });
   const token = await tokenP;
+  alive(); // the Google window may answer long after the user pressed "cancel"
+
+  step('folder');
   const folder = await drive.ensureFolder(token);
-  const existing = sortedParsed(await drive.listFiles(token, folder.id, 'backup'));
+  alive();
 
-  // protection against an accidentally empty database replacing good copies
-  const guard = checkGuard(existing, built.counts.entries, await getAck());
+  step('upload');
+  const [listed, uploaded] = await Promise.allSettled([
+    drive.listFiles(token, folder.id, 'backup'),
+    drive.uploadFile(token, { name: built.name, parent: folder.id, text: built.text, kind: 'backup' }),
+  ]);
+  if (uploaded.status === 'rejected') throw uploaded.reason;
+  const up = uploaded.value;
+  if (signal && signal.aborted) {
+    // stopped after the upload: the new file was never checked, so it must not stay as the newest copy
+    drive.trashFile(token, up.id).catch(() => {});
+    throw new BackupError('cancelled', 'cancelled');
+  }
+  // if the list of old copies could not be read, nothing is removed this time (the next run will clean up)
+  const listOk = listed.status === 'fulfilled';
 
-  const up = await drive.uploadFile(token, { name: built.name, parent: folder.id, text: built.text, kind: 'backup' });
+  step('verify');
   let back;
   try {
     back = await drive.downloadText(token, up.id);
@@ -246,17 +327,21 @@ export async function backupToDrive(built, { interactive = false } = {}) {
     await drive.trashFile(token, up.id).catch(() => {});
     throw new BackupError('verify_failed', 'file on Drive differs from the source');
   }
-
-  let rotated = 0;
-  const all = sortedParsed([...existing.map((f) => ({ id: f.id, name: f.name, size: f.size })), { id: up.id, name: built.name, size: up.size }]);
-  for (const f of planRotation(all, guard)) {
-    try {
-      await drive.trashFile(token, f.id);
-      rotated++;
-    } catch {
-      /* the next backup will try again */
-    }
+  if (signal && signal.aborted) {
+    drive.trashFile(token, up.id).catch(() => {});
+    throw new BackupError('cancelled', 'cancelled');
   }
+
+  step('cleanup');
+  const existing = listOk ? sortedParsed(listed.value).filter((f) => f.id !== up.id) : [];
+  // protection against an accidentally empty database replacing good copies
+  const guard = listOk ? checkGuard(existing, built.counts.entries, await getAck()) : null;
+  const all = sortedParsed([...existing.map((f) => ({ id: f.id, name: f.name, size: f.size })), { id: up.id, name: built.name, size: up.size }]);
+  // the copy that was just verified is never the one that goes (copies are ordered by the time in their
+  // names, and a wrong clock on the phone once could put it behind ten "newer" files)
+  const doomed = listOk ? planRotation(all, guard).filter((f) => f.id !== up.id) : [];
+  const trashed = await Promise.allSettled(doomed.map((f) => drive.trashFile(token, f.id)));
+  const rotated = trashed.filter((r) => r.status === 'fulfilled').length;
   return { ok: true, id: up.id, name: built.name, rotated, guard, folderId: folder.id, account: drive.accountEmail() };
 }
 
@@ -275,7 +360,7 @@ export async function fetchDriveBackup(id, { interactive = false } = {}) {
 // ---------- orchestrator ----------
 
 let inflight = null;
-let again = false;
+let currentCtl = null;
 // called after the silent follow-up round finished, so the screen can reload the status
 let followUpHook = null;
 export function onFollowUp(fn) {
@@ -286,62 +371,129 @@ export function errorCode(e) {
   return (e && e.code) || 'error';
 }
 
-// One tap = Drive + phone folder. Each part has its own result and its own date.
-export function runBackup(db, { interactive = false } = {}) {
+// The user pressed "cancel" while a backup is running.
+export function cancelBackup() {
+  if (currentCtl) currentCtl.abort();
+}
+
+// A whole Drive backup may take this long at most, then it stops by itself.
+export const LIMITS = { total: 120000 };
+
+// Status is written in a queue, so the Drive and phone parts never overwrite each other.
+let statusChain = Promise.resolve();
+function updateStatus(fn) {
+  const run = statusChain.then(async () => {
+    const s = await getStatus();
+    s.drive = s.drive || {};
+    s.local = s.local || {};
+    fn(s);
+    await setStatus(s);
+  });
+  statusChain = run.catch(() => {});
+  return run;
+}
+
+// Automatic and manual backup to Drive. Returns {at, built, drive, local: null, steps, manual}.
+// A call that arrives while a backup is running joins it. When the data changed during the run
+// (its revision number is higher) and the run succeeded, one more silent round saves the latest data.
+let runManual = false;
+let runRev = 0;
+export function runBackup(db, { interactive = false, manual = false } = {}) {
   if (inflight) {
-    again = true;
+    if (manual) runManual = true;
     return inflight;
   }
-  inflight = doRun(db, { interactive }).finally(() => {
+  runManual = manual;
+  runRev = db.rev || 0;
+  const run = doRun(db, { interactive });
+  inflight = run.finally(() => {
     inflight = null;
-    if (again) {
-      again = false;
-      // changes made while the backup was running: one more silent round
+  });
+  // (registered after the line above, so it runs when `inflight` is already free)
+  run.then(
+    (r) => {
+      const latest = globalThis.__shiftlogDb || db;
+      if (!(r && r.drive && r.drive.ok) || (latest.rev || 0) <= runRev) return;
       Promise.resolve()
-        .then(() => runBackup(globalThis.__shiftlogDb || db, { interactive: false }))
+        .then(() => runBackup(latest, { interactive: false }))
         .then(() => (followUpHook ? followUpHook() : null))
         .catch(() => {});
-    }
-  });
+    },
+    () => {},
+  );
   return inflight;
 }
 
 async function doRun(db, { interactive }) {
+  const ctl = new AbortController();
+  currentCtl = ctl;
+  drive.setRunSignal(ctl.signal);
+  let timedOut = false;
+  const watchdog = setTimeout(() => {
+    timedOut = true;
+    ctl.abort();
+  }, LIMITS.total);
+  const tracker = makeTracker(DRIVE_STEPS, (t) => {
+    if (progressHook) progressHook(t);
+  });
+  tracker.step('prepare');
   const built = buildBackup(db);
-  const driveP = backupToDrive(built, { interactive }); // starts sign-in synchronously
-  const localP = backupToLocal(built);
-  const [d, l] = await Promise.allSettled([driveP, localP]);
+  // NOTE: nothing may be awaited before this call (Google sign-in must start inside the tap)
+  const driveP = backupToDrive(built, { interactive, tracker, signal: ctl.signal });
+  // "cancel" and the time limit also end a wait that has no request of its own (the Google window)
+  const stopped = new Promise((_, reject) => {
+    ctl.signal.addEventListener('abort', () => reject(new BackupError('cancelled', 'cancelled')), { once: true });
+  });
+  let d;
+  try {
+    d = { ok: true, value: await Promise.race([driveP, stopped]) };
+  } catch (e) {
+    tracker.fail();
+    d = { ok: false, reason: e };
+    if (ctl.signal.aborted) drive.abandonSignIn();
+  } finally {
+    clearTimeout(watchdog);
+    drive.setRunSignal(null);
+    currentCtl = null;
+    tracker.end();
+  }
   const at = new Date().toISOString();
-  const status = await getStatus();
-  status.drive = status.drive || {};
-  status.local = status.local || {};
+  const steps = tracker.snapshot();
 
-  const result = { at, built, drive: null, local: null };
-  if (d.status === 'fulfilled') {
+  const result = { at, built, drive: null, local: null, steps, manual: runManual };
+  if (d.ok) {
     result.drive = d.value;
-    status.drive.lastOk = { at, name: built.name, entries: built.counts.entries, rev: built.rev, account: d.value.account, guard: d.value.guard || null };
-    delete status.drive.lastFail;
   } else {
-    const code = errorCode(d.reason);
+    let code = errorCode(d.reason);
+    if (code === 'cancelled' && timedOut) code = 'timeout';
     result.drive = { ok: false, code, message: String(d.reason?.message || '') };
-    // A silent run without a valid Google token is not a failure, it was simply not attempted:
-    // the screen then asks for one tap instead of showing a red error.
-    const notAttempted = code === 'not_configured' || code === 'redirecting' || (!interactive && (code === 'need_login' || code === 'unauthorized'));
-    if (!notAttempted) status.drive.lastFail = { at, code, message: result.drive.message };
   }
-  if (l.status === 'fulfilled') {
-    result.local = l.value;
-    if (l.value.ok) {
-      status.local.lastOk = { at, name: built.name, entries: built.counts.entries, rev: built.rev, folder: l.value.folderName, guard: l.value.guard || null };
-      delete status.local.lastFail;
+  await updateStatus((status) => {
+    if (d.ok) {
+      status.drive.lastOk = { at, name: built.name, entries: built.counts.entries, rev: built.rev, account: d.value.account, guard: d.value.guard || null, ms: steps.totalMs };
+      delete status.drive.lastFail;
+    } else {
+      const code = result.drive.code;
+      // A silent run without a valid Google token is not a failure, it was simply not attempted:
+      // the screen then asks for one tap instead of showing a red error. Cancelled by the user: same.
+      const notAttempted = code === 'not_configured' || code === 'redirecting' || code === 'cancelled' || (!interactive && (code === 'need_login' || code === 'unauthorized'));
+      if (!notAttempted) status.drive.lastFail = { at, code, message: result.drive.message };
     }
-  } else {
-    const code = errorCode(l.reason);
-    result.local = { ok: false, code, message: String(l.reason?.message || '') };
-    status.local.lastFail = { at, code, message: result.local.message };
-  }
-  await setStatus(status);
+  });
   return result;
+}
+
+// The phone copy: the browser saves a file into the "Downloads" folder (no folder access needed).
+// The page cannot check afterwards that the file is really there, so it is marked "not verified".
+export async function backupToPhone(db) {
+  const built = buildBackup(db);
+  downloadBackup(built);
+  const at = new Date().toISOString();
+  await updateStatus((status) => {
+    status.local.lastOk = { at, name: built.name, entries: built.counts.entries, rev: built.rev, via: 'download', guard: null };
+    delete status.local.lastFail;
+  });
+  return { ok: true, name: built.name, at, entries: built.counts.entries, verified: false, bytes: built.bytes };
 }
 
 // ---------- restore ----------
