@@ -43,7 +43,10 @@ export const TICK_PARTS = [
   [11000, 0.8, 0.0009],
 ];
 const TICK_MS = 35;
-const TICK_GAIN = 0.18; // how loud the tick is (1 = full scale); the one number to change if it is too quiet or too loud
+// How loud the tick is: a FIXED 25% of full scale (1 = full scale), the same for every tick. A web page cannot read or
+// change the volume of the phone, so the phone's media volume still scales it; but relative to that volume the tick is
+// always the same. This is the one number to change if it is too quiet or too loud.
+const TICK_GAIN = 0.25;
 
 // the samples of one tick for a given sample rate; the loudest sample is exactly 1
 export function makeTickSamples(rate) {
@@ -81,8 +84,8 @@ function tickSound() {
     const src = a.createBufferSource();
     const gain = a.createGain();
     src.buffer = tickBuffer(a);
-    src.playbackRate.value = 1 + (Math.random() * 2 - 1) * 0.03; // every tick a little different: pitch +-3%
-    gain.gain.value = TICK_GAIN * (1 + (Math.random() * 2 - 1) * 0.1); // and loudness +-10%
+    src.playbackRate.value = 1 + (Math.random() * 2 - 1) * 0.03; // pitch +-3% so that it does not sound like a machine (the loudness never changes)
+    gain.gain.value = TICK_GAIN; // the loudness is always the same
     src.connect(gain);
     gain.connect(a.destination);
     src.start();
