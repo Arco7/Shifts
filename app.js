@@ -3,7 +3,7 @@
 import { h, icon, clear, initSheets } from './dom.js';
 import { ctx } from './ctx.js';
 import { loadDb, emptyDb, isEmptyDb, requestPersist, kvGet } from './store.js';
-import { validateDb } from './backup.js';
+import { validateDb, setExtrasHooks } from './backup.js';
 import { fmtDate } from './calc.js';
 import { loadStatus, worstLevel, onDataChanged, handleRedirectResult } from './autobackup.js';
 import { shiftsScreen } from './ui-shifts.js';
@@ -11,7 +11,7 @@ import { workScreen } from './ui-work.js';
 import { backupScreen, firstRunScreen, startRestoreFromDrive } from './ui-backup.js';
 import { settingsScreen } from './ui-settings.js';
 import { isConfigured, loadGis, consumeRedirectResult, signInMode } from './drive.js';
-import { prefs, loadPrefs, onPrefsChange } from './prefs.js';
+import { prefs, loadPrefs, onPrefsChange, colorExtrasHooks } from './prefs.js';
 import { applyAppearance } from './themes.js';
 import { T } from './strings.js';
 
@@ -51,6 +51,7 @@ function renderNav(nav) {
 }
 
 export function render() {
+  ctx.sliding = false; // whatever redraws the screen ends a slider drag (the slider is a new element now)
   const view = document.getElementById('view');
   const nav = document.getElementById('nav');
   const prevScroll = view.querySelector('.scroll');
@@ -88,14 +89,17 @@ async function boot() {
     console.error(e);
   }
   applyAppearance(prefs);
+  setExtrasHooks(colorExtrasHooks()); // "my colors" travel in the backup file as a harmless extra
   onPrefsChange(() => {
+    applyAppearance(prefs);
+    // a color slider is being dragged: the colors change at once, but the screen is not redrawn under the finger
+    if (ctx.sliding) return;
     // the screen is drawn again: remember which control had the focus and give it back
     const a = document.activeElement;
-    const d = a && a.dataset ? { pref: a.dataset.pref, value: a.dataset.value, theme: a.dataset.theme } : null;
-    applyAppearance(prefs);
+    const d = a && a.dataset ? { pref: a.dataset.pref, value: a.dataset.value, theme: a.dataset.theme, slot: a.dataset.slot } : null;
     render();
-    if (d && (d.pref || d.theme)) {
-      const sel = d.theme ? `[data-theme="${d.theme}"]` : `[data-pref="${d.pref}"]` + (d.value !== undefined ? `[data-value="${d.value}"]` : '');
+    if (d && (d.pref || d.theme || d.slot !== undefined)) {
+      const sel = d.theme ? `[data-theme="${d.theme}"]` : d.slot !== undefined ? `[data-slot="${d.slot}"]` : `[data-pref="${d.pref}"]` + (d.value !== undefined ? `[data-value="${d.value}"]` : '');
       document.querySelector('#view ' + sel)?.focus({ preventScroll: true });
     }
   });

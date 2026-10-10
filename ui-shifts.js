@@ -10,6 +10,7 @@ import { statusStrip } from './ui-common.js';
 import { isEmptyDb } from './store.js';
 import { prefs } from './prefs.js';
 import { printMonthReport } from './report.js';
+import { press } from './feedback.js';
 import { T, f, monthTitle, weekdayShort, fmtDM, fmtTime, fmtDMY } from './strings.js';
 
 export function setMonth(m) {
@@ -149,7 +150,7 @@ export function shiftsScreen({ goBackup }) {
   const top = h(
     'div',
     { class: 'topbar' },
-    h('button', { class: 'round-btn', type: 'button', 'aria-label': T.addEntry, onclick: () => openEntrySheet() }, icon('plus', 24)),
+    h('button', { class: 'round-btn', type: 'button', 'aria-label': T.addEntry, onclick: () => { press(); openEntrySheet(); } }, icon('plus', 24)),
     h('button', { class: 'chip', type: 'button', onclick: () => openJobPicker() }, h('span', null, j.name), icon('chevD', 18)),
     h('button', { class: 'text-btn', type: 'button', onclick: () => { ctx.editMode = !ctx.editMode; ctx.render(); } }, ctx.editMode ? T.done : T.edit),
   );

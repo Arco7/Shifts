@@ -37,7 +37,7 @@ const secs = (ms) => f(T.pgSec, { n: (ms / 1000).toFixed(1) });
 
 // ---------- restore ----------
 
-async function applyRestore(newDb, source = null) {
+async function applyRestore(newDb, source = null, env = null) {
   // 1. safety copy of what is in the app now (kept on the phone, and on Drive when possible)
   if (!isEmptyDb(ctx.db)) {
     const built = await B.saveSafety(ctx.db);
@@ -63,6 +63,8 @@ async function applyRestore(newDb, source = null) {
   await loadStatus();
   ctx.render();
   toast(f(T.bRestoreDone, { n: ctx.db.entries.length }));
+  // LAST, and on its own: the saved colors from the file. The shifts are already restored; applyExtras never throws.
+  await B.applyExtras(env);
 }
 
 // shows what was found and asks. Returns true when restored.
@@ -78,7 +80,7 @@ async function confirmRestore(parsed, whenText, source = null) {
   const ok = await confirmDialog({ title: f(T.bRestoreFound, { date: lri(whenText) }), text: T.bRestoreAsk, details, okText: T.bRestoreYes, cancelText: T.cancel, danger: cur.entries > 0 });
   if (!ok) return false;
   try {
-    await applyRestore(parsed.db, source);
+    await applyRestore(parsed.db, source, parsed.env);
     return true;
   } catch (e) {
     toast(`${T.bRestoreFail}: ${errText(errCode(e))}`, { kind: 'err' });
@@ -382,7 +384,6 @@ function phoneCard() {
       { class: 'card-extra' },
       h('button', { class: 'btn wide', type: 'button', onclick: () => onPhoneBackup() }, icon('download', 22), T.bNowPhone),
       res,
-      h('div', { class: 'hint' }, T.bPhoneNote),
     ),
   );
 }
@@ -478,15 +479,6 @@ export function openRecoveryHelp() {
   sheet = openSheet(body, { full: true });
 }
 
-function helpCard() {
-  return h(
-    'div',
-    { class: 'card' },
-    h('div', { class: 'card-title' }, icon('shield', 20), T.rcTitle),
-    h('button', { class: 'btn', type: 'button', onclick: () => openRecoveryHelp() }, icon('info', 20), T.rcOpen),
-  );
-}
-
 function guardNote() {
   const g = describeTarget('drive');
   if (!g || !g.guard) return null;
@@ -519,17 +511,12 @@ function guardNote() {
 
 export function backupScreen() {
   const head = h('div', { class: 'screen-head' }, h('div', { class: 'screen-title' }, T.backupTitle));
-  const storage = h(
-    'div',
-    { class: 'card' },
-    h('div', { class: 'card-title' }, icon('lock', 20), T.bStorage),
-    h('div', { class: 'status-line ' + (ctx.persisted ? 'ok' : 'warn') }, icon(ctx.persisted ? 'check' : 'alert', 18), ctx.persisted ? T.bPersistOk : T.bPersistNo),
-    h('div', { class: 'hint' }, T.bAuto),
-  );
+  // the storage card is gone; only when the phone does NOT protect the data from automatic cleaning, one short warning
+  const storage = ctx.persisted === false ? h('div', { class: 'card warn-card' }, h('div', { class: 'status-line warn' }, icon('alert', 18), T.bPersistNo)) : null;
   const body = h(
     'div',
     { class: 'scroll' },
-    h('div', { class: 'stack' }, driveCard(), phoneCard(), guardNote(), googleCard(), restoreCard(), helpCard(), storage, h('div', { class: 'version' }, f(T.bVersion, { v: APP_VERSION }))),
+    h('div', { class: 'stack' }, driveCard(), phoneCard(), guardNote(), googleCard(), restoreCard(), storage, h('div', { class: 'version' }, f(T.bVersion, { v: APP_VERSION }))),
     h('div', { class: 'spacer-bottom' }),
   );
   return [head, body];

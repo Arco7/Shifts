@@ -7,7 +7,6 @@ import { effective } from './settings.js';
 import { parseLocalDT, addDays, daysBetween, fmtDate, fmtHM, fmtMoney, previewEntries } from './calc.js';
 import { T, f, fmtDMYshort } from './strings.js';
 import { dateChip, timeChip } from './ui-datetime.js';
-import { prefs } from './prefs.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -416,12 +415,12 @@ export function openEntrySheet({ entry = null } = {}) {
       // an entry that is already stored and whose times were not touched is not judged again
       const timesChanged = !entry || entry.start !== st.start || entry.end !== st.end;
       if (timesChanged && durMin > MAX_SHIFT_MIN) return toast(T.errTooLong, { kind: 'err' });
-      if (prefs.warnUnusual && timesChanged && durMin > WARN_SHIFT_MIN) {
+      if (timesChanged && durMin > WARN_SHIFT_MIN) {
         const ok = await confirmDialog({ title: f(T.confirmLongShift, { d: fmtHM(durMin) }), okText: T.keep, cancelText: T.cancel });
         if (!ok) return;
       }
       // a date that looks like a typing error (only when the date is new or was changed)
-      if (prefs.warnUnusual && (!entry || entry.start !== st.start)) {
+      if (!entry || entry.start !== st.start) {
         const diff = daysBetween(todayStr(), dOf(st.start));
         if (diff > ODD_AHEAD_SHIFT_DAYS || diff < -ODD_BACK_DAYS) {
           const ok = await confirmDialog({ title: f(T.confirmOddDate, { date: fmtDMYshort(dOf(st.start)) }), okText: T.keep, cancelText: T.cancel });
@@ -451,7 +450,7 @@ export function openEntrySheet({ entry = null } = {}) {
         if (!ok) return;
       }
     }
-    if (prefs.warnUnusual && (!entry || entry.date !== st.from)) {
+    if (!entry || entry.date !== st.from) {
       const diff = daysBetween(todayStr(), st.from);
       if (Math.abs(diff) > ODD_RANGE_DAYS) {
         const ok = await confirmDialog({ title: f(T.confirmOddDate, { date: fmtDMYshort(st.from) }), okText: T.keep, cancelText: T.cancel });

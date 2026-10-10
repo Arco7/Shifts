@@ -16,11 +16,12 @@ export const ctx = {
   progressManual: false, // the user pressed the button (show the progress even for the first steps)
   lastResult: null, // result of the last Drive backup: {kind, ok, code, at, steps, ...}
   lastPhone: null, // result of the last phone backup
-  persisted: false,
+  persisted: null, // null = not known yet; false = the phone may clean the data when it is short of space
   hadData: false,
   started: false,
   corrupt: false,
   corruptRaw: null,
+  sliding: false, // a color slider is being dragged: the settings screen must not be redrawn under the finger
   render: () => {},
   afterCommit: () => {},
 };

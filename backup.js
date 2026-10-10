@@ -87,9 +87,49 @@ export function diffSig(db, sig) {
   return { added, changed, removed, total: added + changed + removed };
 }
 
+// ---------- extras: small optional things that travel next to the data (the saved colors) ----------
+// RULE: the shifts are what matters. An extra can NEVER stop a backup or a restore: both calls below swallow
+// every error, an extra that cannot be read is just left out of the file, and one that cannot be applied is
+// just not applied. Extras live beside `data` in the file (never inside it), are not counted, not part of the
+// "unsaved changes" signature, and the file version stays 1, so older versions of the app read such a file as before.
+let extrasHooks = null;
+// hooks: { collect(): object|null (what to write), apply(extras): void|Promise (what to do after a restore) }
+export function setExtrasHooks(hooks) {
+  extrasHooks = hooks || null;
+}
+const EXTRAS_MAX_BYTES = 4000;
+function collectExtras() {
+  try {
+    if (!extrasHooks || typeof extrasHooks.collect !== 'function') return null;
+    const x = extrasHooks.collect();
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+    const text = JSON.stringify(x);
+    if (typeof text !== 'string' || text === '{}' || text.length > EXTRAS_MAX_BYTES) return null;
+    return JSON.parse(text); // a plain copy: nothing live gets into the file
+  } catch (e) {
+    console.error('extras were left out of the backup', e);
+    return null;
+  }
+}
+// After the shifts are fully restored. Returns true when the extras were applied; never throws.
+export async function applyExtras(env) {
+  try {
+    if (!extrasHooks || typeof extrasHooks.apply !== 'function') return false;
+    const x = env && typeof env === 'object' ? env.extras : null;
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return false;
+    await extrasHooks.apply(x);
+    return true;
+  } catch (e) {
+    console.error('extras were not restored', e);
+    return false;
+  }
+}
+
 export function buildBackup(db, now = new Date(), kind = 'backup') {
   const counts = { entries: db.entries.length, jobs: db.jobs.length };
   const env = { format: FORMAT, version: VERSION, createdAt: now.toISOString(), rev: db.rev || 0, counts, data: db };
+  const extras = collectExtras();
+  if (extras) env.extras = extras;
   const text = JSON.stringify(env);
   return {
     text,
