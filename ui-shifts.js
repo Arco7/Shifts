@@ -94,8 +94,7 @@ function rowEl(r) {
   );
 }
 
-// from: the bar the window grows out of (it also shrinks back into it)
-export function openTotalsSheet(from) {
+export function openTotalsSheet() {
   const j = job();
   const res = calcMonth(j, ctx.db.entries, ctx.month);
   const t = res.totals;
@@ -137,7 +136,7 @@ export function openTotalsSheet(from) {
       h('div', { class: 'hint center' }, T.rpHint),
     ),
   );
-  const sheet = openSheet(body, { full: true, from: from instanceof Element ? from : null });
+  const sheet = openSheet(body, { full: true });
   return sheet;
 }
 
@@ -185,7 +184,7 @@ export function shiftsScreen({ goBackup }) {
 
   const bar = h(
     'button',
-    { class: 'totals-bar', type: 'button', onclick: (ev) => openTotalsSheet(ev.currentTarget), 'aria-label': T.totalsOpen },
+    { class: 'totals-bar', type: 'button', onclick: () => openTotalsSheet(), 'aria-label': T.totalsOpen },
     h('span', { class: 'tb-hours' }, ltr(fmtHM(t.netMin)), ' ', T.hours),
     icon('chevU', 22),
     money(fmtMoney(t.total)),

@@ -2,7 +2,7 @@
 // they are uploaded), the saved copy is used only when the network is not available.
 // Google and Drive requests are never touched here.
 
-const CACHE = 'shiftlog-v8';
+const CACHE = 'shiftlog-v9';
 const FILES = [
   './',
   'index.html',

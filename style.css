@@ -1006,23 +1006,6 @@ html[data-theme='red'] .btn.danger {
   padding-bottom: env(safe-area-inset-bottom);
   overflow: hidden;
 }
-/* the totals window: the same width as the bar it grows out of, its bottom edge on the bar (size and place are set in dom.js) */
-.sheet.morph {
-  position: relative;
-  max-height: none;
-  padding-bottom: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 1.1rem;
-}
-.morph-skin {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  background: var(--accent);
-  color: var(--accent-ink);
-  pointer-events: none;
-  border-radius: inherit;
-}
 .sheet.full {
   height: calc(100dvh - 0.625rem);
   max-height: none;
