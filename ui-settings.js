@@ -30,7 +30,7 @@ function toggleRow(key, label, { onChange } = {}) {
 }
 
 // a row of buttons, one of them chosen: options = [{value, label (string|Node), name}]
-function segRow(key, options, { cls = '', label = '' } = {}) {
+function segRow(key, options, { cls = '', label = '', onPick } = {}) {
   return h(
     'div',
     { class: 'seg ' + cls, role: 'radiogroup', 'aria-label': label || null },
@@ -44,7 +44,10 @@ function segRow(key, options, { cls = '', label = '' } = {}) {
           'aria-checked': String(prefs[key] === o.value),
           'aria-label': o.name,
           dataset: { pref: key, value: String(o.value) },
-          onclick: () => setPref(key, o.value),
+          onclick: () => {
+            setPref(key, o.value);
+            if (onPick) onPick(o.value);
+          },
         },
         o.label,
       ),
@@ -204,6 +207,19 @@ function feelCard() {
     h('div', { class: 'card-title' }, icon('clock', 20), T.stFeel),
     toggleRow('vibrate', T.stVibrate, { onChange: (on) => on && sample('vibrate') }),
     toggleRow('sound', T.stSound, { onChange: (on) => on && sample('sound') }),
+    // the loudness of the tick: shown while the tick is on; every press plays one tick at the new level
+    prefs.sound
+      ? h(
+          'div',
+          { class: 'field' },
+          h('span', { class: 'field-label' }, T.stTickLevel),
+          segRow(
+            'tickLevel',
+            T.stTickLevels.map((name, i) => ({ value: i, name, label: name })),
+            { label: T.stTickLevel, onPick: () => sample('sound') },
+          ),
+        )
+      : null,
     toggleRow('pressBuzz', T.stPressBuzz),
   );
 }

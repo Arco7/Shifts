@@ -367,6 +367,8 @@ export const T = {
   stFeel: 'תחושה',
   stVibrate: 'רטט בגלגל השעות',
   stSound: 'צליל בגלגל השעות',
+  stTickLevel: 'עוצמת הצליל',
+  stTickLevels: ['שקט', 'בינוני', 'חזק'],
   stPressBuzz: 'רטט בלחיצה על כפתורים',
   stReminders: 'תזכורות והתראות',
   stStrip: 'פס תזכורת הגיבוי במסך המשמרות',

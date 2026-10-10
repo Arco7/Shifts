@@ -18,6 +18,7 @@ export const DEFAULT_PREFS = {
   myColors: [null, null, null], // three saved colors: {theme, accentSat, tintSat, accentLight} or null
   vibrate: true, // a short buzz when the time wheel passes a row
   sound: false, // a short tick when the time wheel passes a row
+  tickLevel: 1, // 0..2 = how loud the tick is: quiet, medium, loud (see TICK_LEVELS in feedback.js)
   pressBuzz: true, // a short buzz on the round "+" button and on every switch in the settings
   strip: true, // the backup reminder strip on the shifts screen
   staleDays: 3, // unsaved changes turn red after this many days
@@ -38,6 +39,7 @@ const CHECK = {
   myColors: (v) => Array.isArray(v),
   vibrate: isBool,
   sound: isBool,
+  tickLevel: (v) => Number.isInteger(v) && v >= 0 && v <= 2,
   pressBuzz: isBool,
   strip: isBool,
   staleDays: (v) => STALE_CHOICES.includes(v),
