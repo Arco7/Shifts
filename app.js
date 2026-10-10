@@ -9,13 +9,17 @@ import { loadStatus, worstLevel, onDataChanged, handleRedirectResult } from './a
 import { shiftsScreen } from './ui-shifts.js';
 import { workScreen } from './ui-work.js';
 import { backupScreen, firstRunScreen, startRestoreFromDrive } from './ui-backup.js';
+import { settingsScreen } from './ui-settings.js';
 import { isConfigured, loadGis, consumeRedirectResult, signInMode } from './drive.js';
+import { prefs, loadPrefs, onPrefsChange } from './prefs.js';
+import { applyAppearance } from './themes.js';
 import { T } from './strings.js';
 
 const TABS = [
   ['shifts', 'navShifts', 'list'],
   ['work', 'navWork', 'briefcase'],
   ['backup', 'navBackup', 'cloud'],
+  ['settings', 'navSettings', 'gear'],
 ];
 
 let lastTab = null;
@@ -62,6 +66,7 @@ export function render() {
   let parts;
   if (ctx.tab === 'work') parts = workScreen();
   else if (ctx.tab === 'backup') parts = backupScreen();
+  else if (ctx.tab === 'settings') parts = settingsScreen();
   else parts = shiftsScreen({ goBackup: () => goTab('backup') });
   view.replaceChildren(...parts);
   const sc = view.querySelector('.scroll');
@@ -75,6 +80,25 @@ async function boot() {
   ctx.render = render;
   ctx.afterCommit = () => onDataChanged();
   ctx.month = fmtDate(new Date()).slice(0, 7);
+
+  // the look (color, text size, background) is on the page before the first drawing, so nothing flashes
+  try {
+    await loadPrefs();
+  } catch (e) {
+    console.error(e);
+  }
+  applyAppearance(prefs);
+  onPrefsChange(() => {
+    // the screen is drawn again: remember which control had the focus and give it back
+    const a = document.activeElement;
+    const d = a && a.dataset ? { pref: a.dataset.pref, value: a.dataset.value, theme: a.dataset.theme } : null;
+    applyAppearance(prefs);
+    render();
+    if (d && (d.pref || d.theme)) {
+      const sel = d.theme ? `[data-theme="${d.theme}"]` : `[data-pref="${d.pref}"]` + (d.value !== undefined ? `[data-value="${d.value}"]` : '');
+      document.querySelector('#view ' + sel)?.focus({ preventScroll: true });
+    }
+  });
 
   let db = null;
   try {

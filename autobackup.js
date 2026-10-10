@@ -11,10 +11,13 @@ import * as drive from './drive.js';
 import { isEmptyDb } from './store.js';
 import { ctx } from './ctx.js';
 import { toast } from './dom.js';
+import { prefs } from './prefs.js';
 import { T, errText } from './strings.js';
 
-// unsaved changes older than this many days turn the reminder red
+// unsaved changes older than this many days turn the reminder red (the usual value; the user can choose
+// 1 / 3 / 7 / 14 in the settings, see staleDays())
 export const STALE_DAYS = 3;
+export const staleDays = () => prefs.staleDays || STALE_DAYS;
 
 export async function loadStatus() {
   const s = await B.getStatus();
@@ -90,7 +93,7 @@ export function targetState(kind, now = Date.now()) {
   if (lastOk.guard) return { ...base, level: 'warn', code: 'guard', guard: lastOk.guard };
   if (pending) {
     const days = daysSince(u.since, now);
-    const old = now - new Date(u.since).getTime() > STALE_DAYS * 86400000;
+    const old = now - new Date(u.since).getTime() > staleDays() * 86400000;
     return { ...base, level: old ? 'bad' : 'warn', code: 'pending', old, days };
   }
   return base;

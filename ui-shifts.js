@@ -8,6 +8,8 @@ import { openEntrySheet } from './ui-entry.js';
 import { openJobPicker } from './ui-work.js';
 import { statusStrip } from './ui-common.js';
 import { isEmptyDb } from './store.js';
+import { prefs } from './prefs.js';
+import { printMonthReport } from './report.js';
 import { T, f, monthTitle, weekdayShort, fmtDM, fmtTime, fmtDMY } from './strings.js';
 
 export function setMonth(m) {
@@ -129,6 +131,9 @@ export function openTotalsSheet() {
       h('div', { class: 'card totals' }, lines),
       h('div', { class: 'card totals' }, pay, h('div', { class: 'tline total' }, h('span', null, T.tTotal), money(fmtMoney(t.total)))),
       h('div', { class: 'card info' }, h('div', { class: 'tline' }, h('span', null, T.tRate), h('b', null, rateText)), changed.length ? h('div', { class: 'hint' }, f(T.tChanged, { list: changed.join(', ') })) : null),
+      // the month as a PDF: date, entry, exit, hours (no money)
+      h('button', { class: 'btn wide', type: 'button', dataset: { act: 'report' }, onclick: () => printMonthReport() }, icon('file', 22), T.rpButton),
+      h('div', { class: 'hint center' }, T.rpHint),
     ),
   );
   const sheet = openSheet(body, { full: true });
@@ -155,7 +160,8 @@ export function shiftsScreen({ goBackup }) {
     h('div', { class: 'month-title' }, monthTitle(ctx.month)),
     h('button', { class: 'nav-btn', type: 'button', 'aria-label': T.nextMonth, onclick: () => setMonth(shiftMonth(ctx.month, 1)) }, icon('chevL', 28)),
   );
-  const header = h('div', { class: 'screen-head' }, top, nav, statusStrip(goBackup));
+  // the reminder strip can be switched off in the settings: then nothing is drawn (no empty gap)
+  const header = h('div', { class: 'screen-head' }, top, nav, prefs.strip ? statusStrip(goBackup) : null);
 
   const banner =
     isEmptyDb(ctx.db) && ctx.hadData

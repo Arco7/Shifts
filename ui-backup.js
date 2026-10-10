@@ -454,7 +454,7 @@ function restoreCard() {
 }
 
 // "If something breaks": what to do, written for a day when nobody is around to help
-function openRecoveryHelp() {
+export function openRecoveryHelp() {
   let sheet;
   const sec = (title, text) => h('div', { class: 'help-sec' }, h('b', null, title), h('p', null, text));
   const body = h(

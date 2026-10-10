@@ -6,6 +6,7 @@
 import { h, icon, openSheet } from './dom.js';
 import { fmtDate } from './calc.js';
 import { T, MONTHS, WEEKDAYS, fmtDMYshort, weekdayLetter } from './strings.js';
+import { tick, prime } from './feedback.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,6 +84,7 @@ function wheel(count, value, onPick) {
       cur = i;
       mark();
       onPick(i);
+      tick(); // buzz / tick when the wheel passes a row (switchable in the settings)
     }
   });
   return {
@@ -97,6 +99,7 @@ function wheel(count, value, onPick) {
 // Asks for a time. Resolves "HH:MM" or null (cancelled).
 export function pickTime(initial) {
   return new Promise((resolve) => {
+    prime(); // this runs straight from a tap: the sound of the wheel may start
     const m = /^(\d{1,2}):(\d{2})$/.exec(initial || '');
     let hh = m ? Math.min(23, +m[1]) : 8;
     let mm = m ? Math.min(59, +m[2]) : 0;

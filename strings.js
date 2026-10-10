@@ -12,6 +12,7 @@ export const T = {
   navShifts: 'משמרות',
   navWork: 'עבודה',
   navBackup: 'גיבוי',
+  navSettings: 'הגדרות',
 
   // common
   save: 'שמירה',
@@ -238,7 +239,7 @@ export const T = {
   bPendingAny: 'יש שינויים שעדיין לא בגיבוי. לחץ על "גבה ל-Drive עכשיו"',
   bPendingOne: 'שינוי אחד עדיין לא בגיבוי. לחץ על "גבה ל-Drive עכשיו"',
   bPendingN: '{n} שינויים עדיין לא בגיבוי. לחץ על "גבה ל-Drive עכשיו"',
-  bPendingOld: 'השינויים לא בגיבוי כבר {d} ימים. כדאי לגבות עכשיו',
+  bPendingOld: 'השינויים לא בגיבוי כבר {d}. כדאי לגבות עכשיו',
   bFailed: 'לא הועלה',
   bFailedPhone: 'לא נשמר בטלפון',
   bLastSuccess: 'הצלחה אחרונה',
@@ -286,7 +287,7 @@ export const T = {
   bFolderPicked: 'התיקייה נבחרה: {name}',
   bFolderHint: 'הגיבוי נשמר בקבצים בתיקייה הזו. 10 האחרונים נשמרים.',
   bDownload: 'הורדת קובץ גיבוי',
-  bDownloadHint: 'שומר קובץ בתיקיית ההורדות. את הקובץ הזה האפליקציה לא יכולה לבדוק, והיא לא מוחקת קבצים ישנים.',
+  bDownloadHint: 'שולח קובץ להורדה בטלפון. האפליקציה לא יכולה לבדוק שהוא נשמר, והיא לא מוחקת קבצים ישנים.',
   bDownloaded: 'הקובץ הורד',
   bRestore: 'שחזור',
   bRestoreDrive: 'שחזור מ-Drive',
@@ -316,15 +317,15 @@ export const T = {
   bConfirmDriveText: 'הקובץ יועלה ל-Drive ויבדק. זה לוקח כמה שניות.',
   bConfirmDriveYes: 'גבה',
   bConfirmPhoneTitle: 'להוריד קובץ גיבוי לטלפון?',
-  bConfirmPhoneText: 'הקובץ יישמר בתיקיית ההורדות של הטלפון.',
+  bConfirmPhoneText: 'הקובץ יישלח להורדה בטלפון. האפליקציה לא יכולה לבדוק שהוא באמת נשמר.',
   bConfirmPhoneYes: 'הורדה',
   bDropTitle: 'מספר הרשומות לא תואם',
   bDropText: 'בגיבוי האחרון ({where}, {when}) היו {before} רשומות, עכשיו יש {now}. המספר לא תואם. לגבות בכל זאת?',
   bDropWhereDrive: 'ל-Drive',
   bDropWhereLocal: 'לטלפון',
   bDropYes: 'גבה בכל זאת',
-  bPhoneDownloaded: 'הקובץ נשלח להורדה. כדאי לוודא בתיקיית ההורדות',
-  bPhoneNote: 'הקובץ נשמר בתיקיית ההורדות. האפליקציה לא יכולה לבדוק אותו ולא מוחקת קבצים ישנים. מומלץ לעשות את זה מדי פעם, כגיבוי נוסף.',
+  bPhoneDownloaded: 'הקובץ נשלח להורדה. האפליקציה לא יכולה לבדוק שהוא נשמר',
+  bPhoneNote: 'הקובץ נשלח להורדה בטלפון (בדרך כלל לתיקיית ההורדות). האפליקציה לא יכולה לבדוק שהוא נשמר, והיא לא מוחקת קבצים ישנים. אם ביטלת את השמירה בטלפון, התאריך כאן עדיין יתעדכן. מומלץ לעשות את זה מדי פעם, כגיבוי נוסף.',
   bPhoneUnverified: 'הקובץ נשלח להורדה (האפליקציה לא יכולה לבדוק שהוא נשמר)',
   bVerifiedDrive: 'נבדק ב-Drive: הקובץ נקרא חזרה והושווה',
   pgTitle: 'מגבה ל-Drive',
@@ -350,6 +351,48 @@ export const T = {
   loadingFile: 'מוריד את הגיבוי… {n} שנ׳',
   loadingGoogle: 'עובר ל-Google…',
 
+  // settings tab
+  setTitle: 'הגדרות',
+  stLook: 'מראה',
+  stColor: 'צבע',
+  stSize: 'גודל טקסט',
+  stSizeNames: ['קטן מאוד', 'קטן', 'רגיל', 'גדול', 'גדול מאוד'],
+  stBg: 'רקע',
+  stBgBlack: 'שחור',
+  stBgGray: 'אפור כהה',
+  stFeel: 'תחושה',
+  stVibrate: 'רטט בגלגל השעות',
+  stVibrateHint: 'רטט קצר בכל שעה או דקה שהגלגל עובר (בטלפונים שתומכים בזה)',
+  stSound: 'צליל בגלגל השעות',
+  stSoundHint: 'נקישה קצרה בכל שעה או דקה שהגלגל עובר, בעוצמת המדיה של הטלפון',
+  stReminders: 'תזכורות והתראות',
+  stStrip: 'פס תזכורת הגיבוי במסך המשמרות',
+  stStripHint: 'מראה מתי היה הגיבוי האחרון וכמה שינויים עדיין לא בגיבוי',
+  stStale: 'שינויים שלא גובו נהיים אדומים אחרי',
+  stStaleDays: '{n} ימים',
+  stStaleDay: 'יום',
+  stStaleHint: 'חל על הפס ועל הנקודה בלשונית גיבוי',
+  stUnusual: 'אזהרה על משמרת או תאריך חריגים',
+  stUnusualHint: 'שואל לפני שמירה כשמשמרת ארוכה מ-16 שעות או שהתאריך נראה חריג',
+  stSafeTitle: 'מה אי אפשר לכבות',
+  stSafe: 'הגנות על הנתונים פועלות תמיד: בדיקת מספר הרשומות לפני גיבוי, אישור לפני כל גיבוי ושחזור, עותק ביטחון לפני שחזור, והנקודה האדומה על לשונית גיבוי.',
+  stAbout: 'אודות האפליקציה',
+  stAboutOpen: 'פתיחת דף האודות',
+  stRecovery: 'איך משחזרים אם משהו נשבר',
+  stLocalNote: 'ההגדרות האלה נשמרות רק בטלפון הזה ולא בקובץ הגיבוי. בטלפון חדש הן יחזרו לברירת המחדל.',
+
+  // month report (PDF)
+  rpButton: 'דוח שעות לחודש (PDF)',
+  rpHint: 'ייפתח חלון ההדפסה של הדפדפן. בחר "שמירה כ-PDF".',
+  rpTitle: 'דוח שעות',
+  rpDate: 'תאריך',
+  rpIn: 'כניסה',
+  rpOut: 'יציאה',
+  rpHours: 'שעות',
+  rpTotal: 'סה״כ שעות בחודש',
+  rpEmpty: 'אין משמרות בחודש הזה',
+  rpBreakNote: 'השעות אחרי ניכוי הפסקות.',
+
   // recovery help
   rcTitle: 'אם משהו נשבר',
   rcOpen: 'איך משחזרים',
@@ -369,7 +412,7 @@ export const T = {
   stripPending: 'שינויים לא גובו',
   stripPendingOne: 'שינוי אחד לא גובה',
   stripPendingN: '{n} שינויים לא גובו',
-  stripPendingOld: '{t} · {d} ימים',
+  stripPendingOld: '{t} · {d}',
   stripGuard: 'שים לב',
   stripFailed: 'לא הועלה',
   stripPermission: 'צריך לאשר גישה',
@@ -424,6 +467,9 @@ export const lri = (t) => `\u2066${t}\u2069`;
 export function f(text, params = {}) {
   return String(text).replace(/\{(\w+)\}/g, (_, k) => (params[k] != null ? params[k] : ''));
 }
+
+// a number of days as a Hebrew phrase: יום / יומיים / 3 ימים
+export const daysText = (n) => (n === 1 ? 'יום' : n === 2 ? 'יומיים' : `${n} ימים`);
 
 export function errText(code) {
   return T['e_' + code] || f(T.e_generic, { code });

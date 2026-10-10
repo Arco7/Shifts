@@ -3,7 +3,7 @@
 import { h, icon } from './dom.js';
 import { targetState } from './autobackup.js';
 import { clientIdProblem } from './drive.js';
-import { T, f, fmtStamp, errText, ago } from './strings.js';
+import { T, f, fmtStamp, errText, ago, daysText } from './strings.js';
 
 // one line about one backup target: {level, label, text, sub}
 export function describeTarget(kind) {
@@ -30,8 +30,8 @@ export function describeTarget(kind) {
       sub = n == null ? T.bPendingAny : n === 1 ? T.bPendingOne : f(T.bPendingN, { n });
       short = n == null ? T.stripPending : n === 1 ? T.stripPendingOne : f(T.stripPendingN, { n });
       if (s.old) {
-        oldNote = f(T.bPendingOld, { d: s.days });
-        short = f(T.stripPendingOld, { t: short, d: s.days });
+        oldNote = f(T.bPendingOld, { d: daysText(s.days) });
+        short = f(T.stripPendingOld, { t: short, d: daysText(s.days) });
       }
       break;
     }
