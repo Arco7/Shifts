@@ -155,14 +155,140 @@ export function initSheets() {
   });
 }
 
+// ---------- how sheets move (open: slides up, close: slides down; the totals window grows out of the bar) ----------
+const EASE = 'cubic-bezier(0.32, 0.72, 0, 1)'; // a soft stop, like a sheet on an iPhone
+const noMotion = () => {
+  try {
+    return matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+};
+// the same as el.animate(), but it never throws and does nothing where animation is not available
+export function play(el, frames, opts) {
+  if (!el || typeof el.animate !== 'function' || noMotion()) return null;
+  try {
+    return el.animate(frames, { easing: EASE, ...opts });
+  } catch {
+    return null;
+  }
+}
+// a big window makes the screen behind it a little smaller
+function setBehind() {
+  const app = document.getElementById('app');
+  if (app) app.classList.toggle('behind', stack.some((x) => x.full && !x.closed));
+}
+const rectOf = (el) => el.getBoundingClientRect();
+
+// the window "grows" out of the element it was opened from (the totals bar): the visible part of the window starts as the
+// bar and grows upward, a copy of the bar sticks to its top edge and fades away while the content fades in
+function morphSkin(from) {
+  const clone = from.cloneNode(true);
+  clone.removeAttribute('aria-label');
+  clone.tabIndex = -1;
+  clone.style.cssText = 'position:absolute;left:0;top:0;margin:0;width:100%;visibility:visible';
+  const skin = h('div', { class: 'morph-skin', 'aria-hidden': 'true' }, clone);
+  return { skin, clone };
+}
+function morphGeometry(sheet) {
+  const r = rectOf(sheet.from);
+  const o = rectOf(sheet.el);
+  const p = sheet.panel;
+  p.style.width = r.width + 'px';
+  p.style.marginBottom = Math.max(0, o.bottom - r.bottom) + 'px';
+  p.style.height = `max(12rem, calc(${Math.round(r.bottom - o.top)}px - env(safe-area-inset-top) - 3.25rem))`;
+  return r;
+}
+// ends a running "grow" at once (its copy of the bar, its animations, its timer); used when the window is closed while it is
+// still opening, so that two copies never lie on each other
+function endRun(sheet) {
+  const run = sheet.run;
+  if (!run) return;
+  sheet.run = null;
+  clearTimeout(run.timer);
+  run.skin.remove();
+  for (const a of run.anims) if (a) a.cancel();
+}
+function morphRun(sheet, bar, dir) {
+  endRun(sheet);
+  const p = sheet.panel;
+  const r = rectOf(bar);
+  const pr = rectOf(p);
+  const D = Math.max(0, pr.height - r.height);
+  const R = parseFloat(getComputedStyle(bar).borderTopLeftRadius) || 16;
+  const closed = `inset(${D}px 0 0 0 round ${R}px)`;
+  const open = `inset(0 0 0 0 round ${R}px)`;
+  const { skin, clone } = morphSkin(bar);
+  p.append(skin);
+  const opening = dir === 'open';
+  const dur = opening ? 450 : 350;
+  const content = p.querySelector('.sheet-col') || p.firstElementChild;
+  const dim = getComputedStyle(sheet.el).backgroundColor;
+  const anims = [
+    play(p, [{ clipPath: opening ? closed : open }, { clipPath: opening ? open : closed }], { duration: dur, fill: 'both' }),
+    play(clone, [{ transform: `translateY(${opening ? D : 0}px)` }, { transform: `translateY(${opening ? 0 : D}px)` }], { duration: dur, fill: 'both' }),
+    play(skin, [{ opacity: opening ? 1 : 0 }, { opacity: opening ? 0 : 1 }], { duration: opening ? 300 : 250, delay: opening ? 120 : 0, easing: 'ease-out', fill: 'both' }),
+    play(content, [{ opacity: opening ? 0 : 1 }, { opacity: opening ? 1 : 0 }], { duration: opening ? 320 : 180, delay: opening ? 130 : 0, easing: 'ease-out', fill: 'both' }),
+    // only the dimming fades (not the whole layer): the bar must not blink at the start, it must stay solid while it grows
+    play(sheet.el, [{ backgroundColor: opening ? 'rgba(0,0,0,0)' : dim }, { backgroundColor: opening ? dim : 'rgba(0,0,0,0)' }], { duration: 300, delay: opening ? 0 : 50, easing: 'ease-out', fill: 'both' }),
+  ];
+  const ran = anims.some(Boolean);
+  if (!ran) {
+    skin.remove(); // no animation here (reduced motion or an old browser): the window just appears, without the copy of the bar
+    return { ran, dur, skin };
+  }
+  if (opening) {
+    bar.style.visibility = 'hidden'; // the copy of the bar takes its place for the moment
+    const timer = setTimeout(() => endRun(sheet), dur + 80);
+    sheet.run = { skin, anims, timer };
+  }
+  return { ran, dur, skin };
+}
+function showBar(sheet, bar) {
+  const el = bar || sheet.from;
+  if (el && !stack.some((x) => x !== sheet && !x.closed && x.from === el)) el.style.visibility = '';
+}
+
+function playOpen(sheet) {
+  if (sheet.from) {
+    morphGeometry(sheet);
+    const r = morphRun(sheet, sheet.from, 'open');
+    if (!r.ran) showBar(sheet);
+    return;
+  }
+  const dur = sheet.panel.classList.contains('small') ? 300 : 450;
+  play(sheet.panel, [{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }], { duration: dur, fill: 'backwards' });
+  play(sheet.el, [{ opacity: 0 }, { opacity: 1 }], { duration: 250, easing: 'ease-out', fill: 'backwards' });
+}
+
+// returns how long the window needs to leave the screen (ms)
+function playClose(sheet) {
+  const el = sheet.el;
+  const bar = sheet.from && document.contains(sheet.from) ? sheet.from : sheet.from ? document.querySelector('.totals-bar') : null;
+  if (sheet.from && bar && !noMotion()) {
+    const r = morphRun(sheet, bar, 'close');
+    if (r.ran) {
+      setTimeout(() => showBar(sheet, bar), r.dur);
+      return r.dur;
+    }
+  }
+  if (sheet.from) showBar(sheet, bar);
+  const dur = sheet.panel.classList.contains('small') ? 250 : 350;
+  const a = play(sheet.panel, [{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }], { duration: dur, fill: 'forwards' });
+  play(el, [{ opacity: 1 }, { opacity: 0 }], { duration: dur - 50, delay: 50, easing: 'ease-out', fill: 'forwards' });
+  return a ? dur : 0;
+}
+
 function destroy(sheet) {
   const i = stack.indexOf(sheet);
   if (i < 0) return false;
   stack.splice(i, 1);
   sheet.closed = true;
-  sheet.el.classList.add('closing');
+  sheet.el.classList.add('closing'); // no more taps while it leaves
+  setBehind();
   const el = sheet.el;
-  setTimeout(() => el.remove(), 180);
+  const ms = playClose(sheet);
+  setTimeout(() => el.remove(), ms + 30);
   if (sheet.onClose) {
     try {
       sheet.onClose();
@@ -173,11 +299,11 @@ function destroy(sheet) {
   return true;
 }
 
-// content: Node. opts: {full: true, small: true, onClose, dismissible: true}
+// content: Node. opts: {full: true, small: true, from: element (the window grows out of it), onClose, dismissible: true}
 export function openSheet(content, opts = {}) {
-  const panel = h('div', { class: 'sheet' + (opts.full ? ' full' : '') + (opts.small ? ' small' : ''), role: 'dialog', 'aria-modal': 'true' }, content);
+  const panel = h('div', { class: 'sheet' + (opts.from ? ' morph' : opts.full ? ' full' : '') + (opts.small ? ' small' : ''), role: 'dialog', 'aria-modal': 'true' }, content);
   const overlay = h('div', { class: 'overlay' }, panel);
-  const sheet = { el: overlay, panel, onClose: opts.onClose, closed: false };
+  const sheet = { el: overlay, panel, onClose: opts.onClose, closed: false, full: !!opts.full && !opts.from, from: opts.from || null };
   sheet.close = () => {
     if (destroy(sheet) && stack.length === 0) dropSentinel();
   };
@@ -190,6 +316,8 @@ export function openSheet(content, opts = {}) {
   stack.push(sheet);
   ensureSentinel();
   sheetRoot().append(overlay);
+  setBehind();
+  playOpen(sheet);
   return sheet;
 }
 

@@ -1,6 +1,6 @@
 // ui-shifts.js: the "shifts" tab: month list with totals.
 
-import { h, icon, openSheet, confirmDialog, toast, money, ltr } from './dom.js';
+import { h, icon, openSheet, confirmDialog, toast, money, ltr, play } from './dom.js';
 import { ctx, job, commit } from './ctx.js';
 import { calcMonth, fmtHM, fmtMoney } from './calc.js';
 import { shiftMonth } from './settings.js';
@@ -83,19 +83,19 @@ function rowEl(r) {
       sub = h('div', { class: 'row-sub' }, money(fmtMoney(r.total)), ...extra);
     }
   }
-  const del = ctx.editMode
-    ? h('button', { class: 'minus', type: 'button', 'aria-label': T.delete, onclick: (ev) => { ev.stopPropagation(); deleteEntry(r); } }, icon('minus', 22))
-    : null;
+  // the red circle is in every row all the time; it is shown (it slides in from the right edge) only in the edit mode
+  const del = h('button', { class: 'minus', type: 'button', 'aria-label': T.delete, onclick: (ev) => { ev.stopPropagation(); deleteEntry(r); } }, icon('minus', 22));
   return h(
     'div',
     { class: 'row' + (r.skipped ? ' dim' : '') + (r.kind !== 'shift' ? ' day ' + r.kind : ''), role: 'button', tabindex: '0', onclick: () => openEntrySheet({ entry: r.entry }), onkeydown: (ev) => { if (ev.key === 'Enter') openEntrySheet({ entry: r.entry }); } },
+    del,
     circle,
     h('div', { class: 'row-body' }, main, sub),
-    del,
   );
 }
 
-export function openTotalsSheet() {
+// from: the bar the window grows out of (it also shrinks back into it)
+export function openTotalsSheet(from) {
   const j = job();
   const res = calcMonth(j, ctx.db.entries, ctx.month);
   const t = res.totals;
@@ -137,8 +137,17 @@ export function openTotalsSheet() {
       h('div', { class: 'hint center' }, T.rpHint),
     ),
   );
-  const sheet = openSheet(body, { full: true });
+  const sheet = openSheet(body, { full: true, from: from instanceof Element ? from : null });
   return sheet;
+}
+
+// edit mode on and off: no redraw, the red circles slide in and out and the word changes softly
+function toggleEdit(btn) {
+  ctx.editMode = !ctx.editMode;
+  document.querySelector('#view .scroll')?.classList.toggle('editing', ctx.editMode);
+  const word = btn.firstElementChild;
+  word.textContent = ctx.editMode ? T.done : T.edit;
+  play(word, [{ opacity: 0 }, { opacity: 1 }], { duration: 250, easing: 'ease-out' });
 }
 
 export function shiftsScreen({ goBackup }) {
@@ -152,7 +161,7 @@ export function shiftsScreen({ goBackup }) {
     { class: 'topbar' },
     h('button', { class: 'round-btn', type: 'button', 'aria-label': T.addEntry, onclick: () => { press(); openEntrySheet(); } }, icon('plus', 24)),
     h('button', { class: 'chip', type: 'button', onclick: () => openJobPicker() }, h('span', null, j.name), icon('chevD', 18)),
-    h('button', { class: 'text-btn', type: 'button', onclick: () => { ctx.editMode = !ctx.editMode; ctx.render(); } }, ctx.editMode ? T.done : T.edit),
+    h('button', { class: 'text-btn', type: 'button', onclick: (ev) => toggleEdit(ev.currentTarget) }, h('span', null, ctx.editMode ? T.done : T.edit)),
   );
   const nav = h(
     'div',
@@ -172,11 +181,11 @@ export function shiftsScreen({ goBackup }) {
   const list = hasRows
     ? h('div', { class: 'list' }, res.rowsDesc.length ? res.rowsDesc.map(rowEl) : null)
     : h('div', { class: 'empty' }, icon('list', 40), h('div', { class: 'empty-title' }, T.emptyMonth), h('div', { class: 'muted' }, T.emptyMonthHint));
-  const scroll = h('div', { class: 'scroll' }, banner, list, h('div', { class: 'spacer-bottom' }));
+  const scroll = h('div', { class: 'scroll' + (ctx.editMode ? ' editing' : '') }, banner, list, h('div', { class: 'spacer-bottom' }));
 
   const bar = h(
     'button',
-    { class: 'totals-bar', type: 'button', onclick: openTotalsSheet, 'aria-label': T.totalsOpen },
+    { class: 'totals-bar', type: 'button', onclick: (ev) => openTotalsSheet(ev.currentTarget), 'aria-label': T.totalsOpen },
     h('span', { class: 'tb-hours' }, ltr(fmtHM(t.netMin)), ' ', T.hours),
     icon('chevU', 22),
     money(fmtMoney(t.total)),

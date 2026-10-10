@@ -110,6 +110,13 @@ p {
   max-width: var(--maxw);
   margin: 0 auto;
   background: var(--bg);
+  transform-origin: 50% 0;
+  transition: transform 0.45s cubic-bezier(0.32, 0.72, 0, 1), border-radius 0.45s;
+}
+#app.behind {
+  transform: scale(0.95); /* a big window is open: the screen behind it steps back a little */
+  border-radius: 1rem;
+  overflow: hidden;
 }
 #view {
   flex: 1;
@@ -126,6 +133,15 @@ p {
 .screen-head {
   padding: calc(env(safe-area-inset-top) + 0.5rem) 0.9rem 0.4rem;
   flex: none;
+}
+/* iPhone, the app opened from the home screen: iOS 26 softens the top edge of the screen, so the header sits 0.5 cm (30 px)
+   lower there. Only WebKit on iOS knows -webkit-touch-callout, so Android and Chrome are not touched. */
+@media (display-mode: standalone) {
+  @supports (-webkit-touch-callout: none) {
+    .screen-head {
+      padding-top: calc(env(safe-area-inset-top) + 0.5rem + 30px);
+    }
+  }
 }
 .screen-title {
   font-size: 1.75rem;
@@ -343,6 +359,7 @@ p {
   border-top: 1px solid var(--line);
 }
 .row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -350,6 +367,10 @@ p {
   background: var(--row-a);
   border-bottom: 1px solid var(--line);
   min-height: 5.4rem;
+  transition: padding-inline-start 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.scroll.editing .row {
+  padding-inline-start: 3.9rem; /* room for the red circle at the start (right) edge */
 }
 .row:nth-child(odd) {
   background: var(--row-b);
@@ -416,8 +437,11 @@ p {
   padding: 1px 0.4rem;
   font-size: 0.7rem;
 }
+/* the red delete circle: in every row, shown only in the edit mode, where it slides in from the right edge */
 .minus {
-  flex: none;
+  position: absolute;
+  inset-inline-start: 0.875rem;
+  top: 50%;
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 50%;
@@ -426,6 +450,16 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(1.25rem, -50%);
+  transition: opacity 0.25s ease-out, transform 0.25s cubic-bezier(0.32, 0.72, 0, 1), visibility 0s 0.25s;
+}
+.scroll.editing .minus {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+  transition-delay: 0s;
 }
 .money {
   white-space: nowrap;
@@ -955,12 +989,9 @@ html[data-theme='red'] .btn.danger {
   align-items: flex-end;
   justify-content: center;
   z-index: 50;
-  animation: fade 0.18s ease-out;
 }
 .overlay.closing {
-  opacity: 0;
-  transition: opacity 0.16s;
-  pointer-events: none;
+  pointer-events: none; /* the window is leaving: no more taps (the movement itself is made in dom.js) */
 }
 .sheet {
   width: 100%;
@@ -973,8 +1004,24 @@ html[data-theme='red'] .btn.danger {
   display: flex;
   flex-direction: column;
   padding-bottom: env(safe-area-inset-bottom);
-  animation: up 0.22s ease-out;
   overflow: hidden;
+}
+/* the totals window: the same width as the bar it grows out of, its bottom edge on the bar (size and place are set in dom.js) */
+.sheet.morph {
+  position: relative;
+  max-height: none;
+  padding-bottom: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 1.1rem;
+}
+.morph-skin {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--accent);
+  color: var(--accent-ink);
+  pointer-events: none;
+  border-radius: inherit;
 }
 .sheet.full {
   height: calc(100dvh - 0.625rem);
